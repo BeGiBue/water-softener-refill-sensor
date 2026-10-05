@@ -1,0 +1,43 @@
+name: Validate
+
+# Läuft nur bei relevanten Änderungen auf main und bei Pull Requests (keine täglichen Läufe, keine Benachrichtigungs-Flut).
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'custom_components/**'
+      - 'tests/**'
+      - 'hacs.json'
+      - 'README.md'
+      - '.github/workflows/validate.yml'
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  hassfest:
+    name: Hassfest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: home-assistant/actions/hassfest@master
+
+  hacs:
+    name: HACS
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: HACS validation
+        uses: hacs/action@main
+        with:
+          category: integration
+          ignore: brands
+
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m unittest discover -s tests -v

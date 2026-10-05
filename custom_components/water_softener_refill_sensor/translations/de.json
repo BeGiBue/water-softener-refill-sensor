@@ -1,0 +1,153 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Enthärtungsanlage einrichten",
+        "description": "Die Integration zählt die Regenerationen über den Wasserzähler und rechnet den Salzbestand mit. Eine Regeneration wird erkannt, wenn im Zeitfenster mehr Wasser als der Schwellwert verbraucht wird.",
+        "data": {
+          "name": "Name",
+          "water_entity": "Wasserzähler (Zählerstand)",
+          "capacity_kg": "Behältergröße (Salz)",
+          "per_regen_kg": "Salzverbrauch pro Regeneration",
+          "initial_stock_kg": "Aktueller Salzbestand",
+          "threshold_l": "Schwellwert Wasserverbrauch",
+          "window_start_hour": "Zeitfenster von (Uhr)",
+          "window_end_hour": "Zeitfenster bis (Uhr)",
+          "warn_remaining": "Warnung bei Restbestand von (Regenerationen)"
+        },
+        "data_description": {
+          "water_entity": "Sensor mit dem kumulierten Zählerstand in Litern oder m³ (z. B. aus dem Energie-Dashboard).",
+          "capacity_kg": "Wie viel Kilogramm Salz passen in den Salzbehälter?",
+          "per_regen_kg": "Wie viel Kilogramm Salz verbraucht eine Regeneration?",
+          "initial_stock_kg": "Optional. Leer lassen, wenn der Behälter gerade voll ist.",
+          "threshold_l": "Eine Regeneration zählt, wenn im Zeitfenster mehr als diese Menge Wasser verbraucht wird.",
+          "window_start_hour": "Beginn des Zeitfensters, in dem die Regeneration stattfindet (Standard 2 Uhr).",
+          "window_end_hour": "Ende des Zeitfensters (Standard 3 Uhr). Muss nach dem Beginn liegen.",
+          "warn_remaining": "Ab diesem rechnerischen Restbestand erscheint eine Meldung, bis das Nachfüllen bestätigt wird."
+        }
+      }
+    },
+    "error": {
+      "window_invalid": "Das Ende des Zeitfensters muss nach dem Beginn liegen.",
+      "per_regen_too_large": "Der Salzverbrauch pro Regeneration darf nicht größer als die Behältergröße sein.",
+      "stock_too_large": "Der aktuelle Salzbestand darf nicht größer als die Behältergröße sein."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Einstellungen der Enthärtungsanlage",
+        "data": {
+          "water_entity": "Wasserzähler (Zählerstand)",
+          "capacity_kg": "Behältergröße (Salz)",
+          "per_regen_kg": "Salzverbrauch pro Regeneration",
+          "threshold_l": "Schwellwert Wasserverbrauch",
+          "window_start_hour": "Zeitfenster von (Uhr)",
+          "window_end_hour": "Zeitfenster bis (Uhr)",
+          "warn_remaining": "Warnung bei Restbestand von (Regenerationen)"
+        }
+      }
+    },
+    "error": {
+      "window_invalid": "Das Ende des Zeitfensters muss nach dem Beginn liegen.",
+      "per_regen_too_large": "Der Salzverbrauch pro Regeneration darf nicht größer als die Behältergröße sein.",
+      "stock_too_large": "Der aktuelle Salzbestand darf nicht größer als die Behältergröße sein."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "total_regenerations": {
+        "name": "Regenerationen gesamt"
+      },
+      "regenerations_since_refill": {
+        "name": "Regenerationen seit Nachfüllen"
+      },
+      "salt_stock": {
+        "name": "Salzbestand"
+      },
+      "salt_level": {
+        "name": "Salzfüllstand"
+      },
+      "regenerations_left": {
+        "name": "Restbestand Regenerationen"
+      },
+      "last_regeneration": {
+        "name": "Letzte Regeneration"
+      },
+      "last_refill": {
+        "name": "Letztes Nachfüllen"
+      },
+      "window_usage": {
+        "name": "Verbrauch im Zeitfenster"
+      },
+      "next_regeneration_due": {
+        "name": "Nächste Regeneration spätestens"
+      }
+    },
+    "binary_sensor": {
+      "refill_needed": {
+        "name": "Salz nachfüllen"
+      },
+      "regeneration_overdue": {
+        "name": "Regeneration überfällig"
+      }
+    },
+    "number": {
+      "refill_amount": {
+        "name": "Nachgefüllte Salzmenge"
+      }
+    },
+    "button": {
+      "confirm_refill": {
+        "name": "Salz nachgefüllt"
+      },
+      "confirm_full": {
+        "name": "Behälter voll"
+      }
+    }
+  },
+  "services": {
+    "refill": {
+      "name": "Salz nachgefüllt",
+      "description": "Bestätigt das Nachfüllen von Salz. Die nachgefüllte Menge in kg ist Pflicht und wird zum Bestand addiert (höchstens bis voll). Die Meldung endet, sobald der Bestand wieder über der Warnschwelle liegt.",
+      "fields": {
+        "config_entry": {
+          "name": "Enthärtungsanlage",
+          "description": "Nur nötig, wenn mehrere Anlagen eingerichtet sind."
+        },
+        "kg": {
+          "name": "Nachgefüllte Menge",
+          "description": "Menge in kg, die nachgefüllt wurde."
+        }
+      }
+    },
+    "set_salt_stock": {
+      "name": "Salzbestand setzen",
+      "description": "Setzt den rechnerischen Salzbestand auf einen bestimmten Wert (z. B. nach einer Kontrolle des Behälters).",
+      "fields": {
+        "config_entry": {
+          "name": "Enthärtungsanlage",
+          "description": "Nur nötig, wenn mehrere Anlagen eingerichtet sind."
+        },
+        "kg": {
+          "name": "Salzbestand",
+          "description": "Aktueller Bestand in kg."
+        }
+      }
+    },
+    "add_regeneration": {
+      "name": "Regeneration nachtragen",
+      "description": "Trägt eine nicht erkannte Regeneration von Hand nach (Zähler und Salzbestand werden angepasst).",
+      "fields": {
+        "config_entry": {
+          "name": "Enthärtungsanlage",
+          "description": "Nur nötig, wenn mehrere Anlagen eingerichtet sind."
+        },
+        "count": {
+          "name": "Anzahl",
+          "description": "Anzahl der nachzutragenden Regenerationen."
+        }
+      }
+    }
+  }
+}
