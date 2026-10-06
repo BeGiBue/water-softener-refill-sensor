@@ -1,0 +1,87 @@
+name: Migrate wiki once
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/migrate-wiki-once.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  migrate-wiki:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main repository
+        uses: actions/checkout@v4
+
+      - name: Check that the GitHub wiki is initialized
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          WIKI_URL="https://x-access-token:${GH_TOKEN}@github.com/${REPOSITORY}.wiki.git"
+          if ! git ls-remote "${WIKI_URL}" HEAD >/dev/null 2>&1; then
+            echo "::error::The GitHub wiki is enabled but not initialized. Create the first page once in the Wiki tab, then rerun this workflow."
+            exit 1
+          fi
+
+      - name: Publish repository wiki sources to GitHub Wiki
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          WIKI_URL="https://x-access-token:${GH_TOKEN}@github.com/${REPOSITORY}.wiki.git"
+          WIKI_DIR="$(mktemp -d)"
+
+          git clone "${WIKI_URL}" "${WIKI_DIR}"
+          find "${WIKI_DIR}" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -a wiki/. "${WIKI_DIR}/"
+
+          cd "${WIKI_DIR}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "Wiki already matches the repository sources."
+          else
+            git commit -m "Import project documentation"
+            git push origin HEAD
+          fi
+
+      - name: Verify expected wiki pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          WIKI_URL="https://x-access-token:${GH_TOKEN}@github.com/${REPOSITORY}.wiki.git"
+          CHECK_DIR="$(mktemp -d)"
+          git clone --depth 1 "${WIKI_URL}" "${CHECK_DIR}"
+
+          expected=(
+            "Home.md"
+            "_Sidebar.md"
+            "Funktionsweise.md"
+            "Installation-und-Einrichtung.md"
+            "Bedienung-im-Alltag.md"
+            "Entitaeten-und-Dienste.md"
+            "Fehlersuche-und-Grenzen.md"
+            "Technische-Dokumentation.md"
+            "Entwicklung-und-Release.md"
+          )
+
+          for file in "${expected[@]}"; do
+            test -f "${CHECK_DIR}/${file}" || {
+              echo "::error::Missing wiki page: ${file}"
+              exit 1
+            }
+          done
+
+          echo "All expected wiki pages are present."
