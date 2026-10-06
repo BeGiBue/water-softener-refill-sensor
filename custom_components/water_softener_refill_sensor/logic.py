@@ -237,6 +237,26 @@ class SoftenerModel:
     def set_stock(self, kg: float) -> None:
         self.state.stock_kg = self._clamp(kg)
 
+    def set_last_regeneration(self, at: datetime, now: datetime) -> None:
+        """Zeitpunkt der letzten Regeneration von Hand setzen (bestimmt die 7-Tage-Regel). Nicht in der Zukunft."""
+        if at > now:
+            raise ValueError("Die letzte Regeneration darf nicht in der Zukunft liegen.")
+        self.state.last_regen_at = at
+
+    def set_regens_since_refill(self, count: int) -> None:
+        """Bekannte Regenerationen seit dem letzten Füllen bis voll setzen.
+
+        Der Bestand wird daraus neu berechnet: Behältergröße minus count × Salzverbrauch pro Regeneration.
+        Der Gesamtzähler wird bei Bedarf auf mindestens count angehoben.
+        """
+        count = int(count)
+        if count < 0:
+            raise ValueError("Die Anzahl der Regenerationen darf nicht negativ sein.")
+        st = self.state
+        st.regens_since_refill = count
+        st.stock_kg = self._clamp(round(self.settings.capacity_kg - count * self.settings.per_regen_kg, 4))
+        st.total_regens = max(st.total_regens, count)
+
     # ------------------------------------------------------------------ Speichern / Laden
     def to_dict(self) -> dict[str, Any]:
         s = self.state

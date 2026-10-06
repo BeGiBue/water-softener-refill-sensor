@@ -8,6 +8,7 @@ import sys
 import types
 import unittest
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 sys.path.insert(0, os.path.dirname(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -26,6 +27,7 @@ from custom_components.water_softener_refill_sensor import (  # noqa: E402
 from custom_components.water_softener_refill_sensor import binary_sensor as bs_mod  # noqa: E402
 from custom_components.water_softener_refill_sensor import button as btn_mod  # noqa: E402
 from custom_components.water_softener_refill_sensor import config_flow  # noqa: E402
+from custom_components.water_softener_refill_sensor import datetime as dt_mod  # noqa: E402
 from custom_components.water_softener_refill_sensor import number as num_mod  # noqa: E402
 from custom_components.water_softener_refill_sensor import sensor as sensor_mod  # noqa: E402
 from custom_components.water_softener_refill_sensor.manager import SoftenerManager  # noqa: E402
@@ -317,6 +319,51 @@ class NightScenario(unittest.TestCase):
         # falscher Eintrag
         with self.assertRaises(Exception):
             _manager_for(hass, call(config_entry="gibt-es-nicht"))
+
+    def test_correct_last_regeneration_and_count(self):
+        hass, entry = self.start()  # 17 kg, 4 kg je Regeneration
+        asyncio.run(self._corrections(hass, entry))
+
+    async def _corrections(self, hass, entry):
+        await async_setup(hass, {})
+        await async_setup_entry(hass, entry)
+        mgr = hass.data["water_softener_refill_sensor"]["abc123"]
+        FakeDt._now = local(13, 12)
+        # Datum der letzten Regeneration (Eingabe-Entität, UTC wie aus der Oberfläche)
+        last = dt_mod.LastRegenerationDateTime(mgr, entry)
+        self.assertIsNone(last.native_value)
+        await last.async_set_value(datetime(2026, 10, 5, 0, 30, tzinfo=ZoneInfo("UTC")))  # = 02:30 Ortszeit
+        d = mgr.coordinator.data
+        self.assertEqual(d["last_regeneration"], local(5, 2, 30))
+        self.assertEqual(d["next_regeneration_due"], local(12, 2))
+        self.assertTrue(d["regeneration_overdue"])  # 12. ist vorbei, keine Regeneration erkannt
+        self.assertIn("water_softener_refill_sensor_abc123_overdue", FakeNotifications.active)
+        self.assertEqual(d["total_regenerations"], 0)  # Datum allein zählt keine Regeneration
+        with self.assertRaises(Exception):  # Zukunft
+            await last.async_set_value(local(20, 2))
+        # Dienst mit Ortszeit ohne Zeitzone: Meldung verschwindet
+        await hass.services.registered["set_last_regeneration"](
+            types.SimpleNamespace(data={"datetime": datetime(2026, 10, 12, 2, 40)})
+        )
+        self.assertEqual(mgr.coordinator.data["last_regeneration"], local(12, 2, 40))
+        self.assertNotIn("water_softener_refill_sensor_abc123_overdue", FakeNotifications.active)
+
+        # Bekannte Regenerationen seit dem Nachfüllen: Bestand 17 - 3 × 4 = 5 kg → Restbestand 1 → Meldung
+        count = num_mod.RegenerationsSinceRefillNumber(mgr, entry)
+        self.assertEqual(count.native_value, 0.0)
+        await count.async_set_native_value(3.0)
+        d = mgr.coordinator.data
+        self.assertEqual(count.native_value, 3.0)
+        self.assertEqual(d["salt_stock_kg"], 5.0)
+        self.assertEqual(d["regenerations_left"], 1)
+        self.assertIn("water_softener_refill_sensor_abc123_low_salt", FakeNotifications.active)
+        await hass.services.registered["set_regenerations_since_refill"](types.SimpleNamespace(data={"count": 1}))
+        self.assertEqual(mgr.coordinator.data["salt_stock_kg"], 13.0)
+        self.assertEqual(mgr.coordinator.data["total_regenerations"], 3)
+        self.assertIn("water_softener_refill_sensor_abc123_low_salt", FakeNotifications.active)  # 3 = Warnschwelle
+        await count.async_set_native_value(0.0)  # 17 kg = 4 Regenerationen → keine Meldung
+        self.assertEqual(mgr.coordinator.data["salt_stock_kg"], 17.0)
+        self.assertEqual(FakeNotifications.active, {})
 
     def test_english_notification(self):
         hass, entry = self.start(capacity_kg=8.0)  # Restbestand 2 → sofort Meldung

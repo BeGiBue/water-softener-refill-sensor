@@ -95,6 +95,9 @@
     "number": {
       "refill_amount": {
         "name": "Salt amount refilled"
+      },
+      "regenerations_since_refill_input": {
+        "name": "Correct regenerations since refill"
       }
     },
     "button": {
@@ -103,6 +106,11 @@
       },
       "confirm_full": {
         "name": "Tank full"
+      }
+    },
+    "datetime": {
+      "last_regeneration_input": {
+        "name": "Correct last regeneration"
       }
     }
   },
@@ -146,6 +154,34 @@
         "count": {
           "name": "Count",
           "description": "Number of regenerations to add."
+        }
+      }
+    },
+    "set_last_regeneration": {
+      "name": "Set last regeneration",
+      "description": "Sets the time of the last regeneration (e.g. from the softener's display). Determines “Next regeneration at the latest” and the “Regeneration overdue” notice. Counters and salt stock stay unchanged.",
+      "fields": {
+        "config_entry": {
+          "name": "Water softener",
+          "description": "Only needed if several softeners are set up."
+        },
+        "datetime": {
+          "name": "Time",
+          "description": "Date and time of the last regeneration (not in the future)."
+        }
+      }
+    },
+    "set_regenerations_since_refill": {
+      "name": "Set regenerations since refill",
+      "description": "Sets the known regenerations since the tank was last filled up. The salt stock is calculated from it: tank capacity minus count × salt used per regeneration.",
+      "fields": {
+        "config_entry": {
+          "name": "Water softener",
+          "description": "Only needed if several softeners are set up."
+        },
+        "count": {
+          "name": "Count",
+          "description": "Regenerations since the tank was last filled up."
         }
       }
     }

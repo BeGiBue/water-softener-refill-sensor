@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.2.0
+
+Zustand von Hand eintragen, z. B. beim Einrichten mitten in einer Füllung.
+
+- Neue Eingabe „Letzte Regeneration korrigieren“ (Datum und Uhrzeit, unter „Konfiguration“ am Gerät) und Dienst
+  `water_softener_refill_sensor.set_last_regeneration`: setzt den Zeitpunkt der letzten Regeneration. Danach richten sich
+  „Nächste Regeneration spätestens“ und „Regeneration überfällig“. Es wird keine Regeneration gezählt; Zeitpunkte in der
+  Zukunft werden abgelehnt.
+- Neue Eingabe „Regenerationen seit Nachfüllen korrigieren“ (Zahl, unter „Konfiguration“) und Dienst
+  `water_softener_refill_sensor.set_regenerations_since_refill`: setzt die bekannten Regenerationen seit dem letzten Füllen
+  bis voll. Der Salzbestand wird daraus berechnet (Behältergröße − Anzahl × Salzverbrauch pro Regeneration), die Meldung
+  „Salz nachfüllen“ passt sich sofort an. Der Gesamtzähler wird bei Bedarf auf mindestens diese Anzahl angehoben.
+- Mit einem echten Home Assistant (2026.2) geprüft.
+
 ## 1.1.1
 
 - Fehler behoben: Beim Hinzufügen der Integration brach der Einrichtungsdialog mit „Der Konfigurationsfluss konnte nicht

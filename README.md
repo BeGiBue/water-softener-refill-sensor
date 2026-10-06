@@ -72,6 +72,10 @@ Den Ordner `custom_components/water_softener_refill_sensor` in dein `config/cust
 
 Alle Werte außer dem Namen und dem anfänglichen Bestand lassen sich später über **Konfigurieren** am Eintrag ändern.
 
+**Mitten in einer Füllung starten:** Nach der Einrichtung am Gerät unter **Konfiguration** „Letzte Regeneration korrigieren“
+(Datum vom Display der Anlage) und „Regenerationen seit Nachfüllen korrigieren“ (bisherige Regenerationen seit dem letzten
+Füllen) eintragen. Der Salzbestand wird dann aus der Anzahl berechnet.
+
 ## Entitäten
 
 Die Entitäten gehören zu einem Gerät mit dem eingestellten Namen (die genauen Entitäts-IDs hängen von Name und Sprache ab).
@@ -92,6 +96,8 @@ Die Entitäten gehören zu einem Gerät mit dem eingestellten Namen (die genauen
 | Nachgefüllte Salzmenge | Eingabe in kg (Zahlenfeld): die Menge, die du nachgefüllt hast; wird nach dem Bestätigen auf 0 zurückgesetzt |
 | Behälter voll | Taste: setzt den Salzbestand mit einem Knopfdruck auf voll (Behältergröße), setzt „Regenerationen seit Nachfüllen“ auf 0 und beendet die Meldung; keine Mengeneingabe nötig |
 | Salz nachgefüllt | Taste: bestätigt das Nachfüllen mit der eingegebenen Menge, addiert sie zum Bestand und beendet die Meldung, sobald der Bestand über der Warnschwelle liegt. Bei Menge 0 passiert nichts (Fehlermeldung). |
+| Letzte Regeneration korrigieren | Eingabe Datum und Uhrzeit (Konfiguration): Zeitpunkt der letzten Regeneration von Hand setzen, z. B. vom Display der Anlage. Bestimmt „Nächste Regeneration spätestens“ und „Regeneration überfällig“; zählt keine Regeneration |
+| Regenerationen seit Nachfüllen korrigieren | Eingabe Zahl (Konfiguration): bekannte Regenerationen seit dem letzten Füllen bis voll. Der Salzbestand wird daraus berechnet (Behältergröße − Anzahl × Salzverbrauch pro Regeneration) |
 
 ## Dienste
 
@@ -100,6 +106,8 @@ Die Entitäten gehören zu einem Gerät mit dem eingestellten Namen (die genauen
 | `water_softener_refill_sensor.refill` | Nachfüllen bestätigen. `kg` (Pflicht, größer als 0): nachgefüllte Menge, wird zum Bestand addiert (höchstens bis voll). |
 | `water_softener_refill_sensor.set_salt_stock` | Rechnerischen Bestand auf einen Wert in kg setzen (z. B. nach Kontrolle des Behälters). |
 | `water_softener_refill_sensor.add_regeneration` | Eine nicht erkannte Regeneration von Hand nachtragen (`count`). |
+| `water_softener_refill_sensor.set_last_regeneration` | Zeitpunkt der letzten Regeneration setzen (`datetime`, nicht in der Zukunft). Zähler und Bestand bleiben unverändert. |
+| `water_softener_refill_sensor.set_regenerations_since_refill` | Bekannte Regenerationen seit dem letzten Füllen bis voll setzen (`count`); der Salzbestand wird daraus berechnet. |
 
 Sind mehrere Anlagen eingerichtet, wird zusätzlich der Eintrag (`config_entry`) angegeben.
 

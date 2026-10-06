@@ -2,7 +2,7 @@
 from homeassistant.const import Platform
 
 DOMAIN = "water_softener_refill_sensor"
-PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.BUTTON, Platform.NUMBER]
+PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.BUTTON, Platform.NUMBER, Platform.DATETIME]
 
 CONF_WATER_ENTITY = "water_entity"
 CONF_CAPACITY_KG = "capacity_kg"
@@ -24,9 +24,12 @@ DEFAULT_WARN_REMAINING = 3
 ATTR_CONFIG_ENTRY = "config_entry"
 ATTR_KG = "kg"
 ATTR_COUNT = "count"
+ATTR_DATETIME = "datetime"
 SERVICE_REFILL = "refill"
 SERVICE_SET_STOCK = "set_salt_stock"
 SERVICE_ADD_REGENERATION = "add_regeneration"
+SERVICE_SET_LAST_REGENERATION = "set_last_regeneration"
+SERVICE_SET_REGENS_SINCE_REFILL = "set_regenerations_since_refill"
 
 STORAGE_VERSION = 1
 SAVE_DELAY = 30  # Sekunden

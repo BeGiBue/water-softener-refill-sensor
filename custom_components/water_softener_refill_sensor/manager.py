@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Any, Callable
 
 from homeassistant.components import persistent_notification
@@ -250,6 +251,24 @@ class SoftenerManager:
 
     async def async_add_regeneration(self, count: int = 1) -> None:
         self.model.add_manual_regeneration(dt_util.now(), count)
+        self._after_manual_change()
+
+    async def async_set_last_regeneration(self, at: datetime) -> None:
+        """Zeitpunkt der letzten Regeneration korrigieren (ohne Zeitzone: Ortszeit von Home Assistant)."""
+        if at.tzinfo is None:
+            at = at.replace(tzinfo=dt_util.get_default_time_zone())
+        try:
+            self.model.set_last_regeneration(dt_util.as_local(at), dt_util.now())
+        except ValueError as err:
+            raise ServiceValidationError(str(err)) from err
+        self._after_manual_change()
+
+    async def async_set_regens_since_refill(self, count: int) -> None:
+        """Bekannte Regenerationen seit dem letzten Füllen setzen; der Salzbestand wird daraus berechnet."""
+        try:
+            self.model.set_regens_since_refill(count)
+        except ValueError as err:
+            raise ServiceValidationError(str(err)) from err
         self._after_manual_change()
 
     def _after_manual_change(self) -> None:

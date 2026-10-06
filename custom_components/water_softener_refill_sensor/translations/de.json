@@ -95,6 +95,9 @@
     "number": {
       "refill_amount": {
         "name": "Nachgefüllte Salzmenge"
+      },
+      "regenerations_since_refill_input": {
+        "name": "Regenerationen seit Nachfüllen korrigieren"
       }
     },
     "button": {
@@ -103,6 +106,11 @@
       },
       "confirm_full": {
         "name": "Behälter voll"
+      }
+    },
+    "datetime": {
+      "last_regeneration_input": {
+        "name": "Letzte Regeneration korrigieren"
       }
     }
   },
@@ -146,6 +154,34 @@
         "count": {
           "name": "Anzahl",
           "description": "Anzahl der nachzutragenden Regenerationen."
+        }
+      }
+    },
+    "set_last_regeneration": {
+      "name": "Letzte Regeneration setzen",
+      "description": "Setzt den Zeitpunkt der letzten Regeneration (z. B. vom Display der Anlage). Bestimmt „Nächste Regeneration spätestens“ und die Meldung „Regeneration überfällig“. Zähler und Salzbestand bleiben unverändert.",
+      "fields": {
+        "config_entry": {
+          "name": "Enthärtungsanlage",
+          "description": "Nur nötig, wenn mehrere Anlagen eingerichtet sind."
+        },
+        "datetime": {
+          "name": "Zeitpunkt",
+          "description": "Datum und Uhrzeit der letzten Regeneration (nicht in der Zukunft)."
+        }
+      }
+    },
+    "set_regenerations_since_refill": {
+      "name": "Regenerationen seit Nachfüllen setzen",
+      "description": "Setzt die bekannten Regenerationen seit dem letzten Füllen bis voll. Der Salzbestand wird daraus berechnet: Behältergröße minus Anzahl × Salzverbrauch pro Regeneration.",
+      "fields": {
+        "config_entry": {
+          "name": "Enthärtungsanlage",
+          "description": "Nur nötig, wenn mehrere Anlagen eingerichtet sind."
+        },
+        "count": {
+          "name": "Anzahl",
+          "description": "Regenerationen seit dem letzten Füllen bis voll."
         }
       }
     }

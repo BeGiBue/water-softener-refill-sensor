@@ -200,6 +200,26 @@ class SaltStock(unittest.TestCase):
         self.assertEqual(m.state.total_regens, 3)
         self.assertEqual(m.state.last_refill_at, at(7, 9))
 
+    def test_set_regens_since_refill_recalculates_stock(self):
+        m = model(capacity_kg=25, per_regen_kg=1.28, warn_remaining=3)
+        m.set_regens_since_refill(12)  # 25 - 12 × 1,28 = 9,64 kg → 7 Regenerationen
+        self.assertEqual(m.state.regens_since_refill, 12)
+        self.assertAlmostEqual(m.state.stock_kg, 9.64)
+        self.assertEqual(m.remaining_regens, 7)
+        self.assertEqual(m.state.total_regens, 12)  # Gesamtzähler mindestens so groß
+        m.set_regens_since_refill(3)
+        self.assertEqual(m.state.total_regens, 12)  # wird nicht verkleinert
+        self.assertAlmostEqual(m.state.stock_kg, 21.16)
+
+    def test_set_regens_since_refill_limits(self):
+        m = model(capacity_kg=25, per_regen_kg=4)
+        m.set_regens_since_refill(100)
+        self.assertEqual(m.state.stock_kg, 0.0)
+        m.set_regens_since_refill(0)
+        self.assertEqual(m.state.stock_kg, 25.0)
+        with self.assertRaises(ValueError):
+            m.set_regens_since_refill(-1)
+
     def test_initial_stock_and_set_stock(self):
         s = Settings(capacity_kg=25, per_regen_kg=4)
         m = SoftenerModel(s, initial_stock_kg=12)
@@ -261,6 +281,17 @@ class HygieneRule(unittest.TestCase):
         self.assertTrue(any(e["type"] == "regeneration" for e in events))
         self.assertFalse(m.regen_overdue(at(13, 3, 1)))
         self.assertEqual(m.next_regen_due(TZ), at(20, 2))
+
+    def test_set_last_regeneration_moves_due_date(self):
+        m = model(capacity_kg=100)
+        m.set_last_regeneration(at(2, 2, 30), now=at(6, 12))
+        self.assertEqual(m.state.last_regen_at, at(2, 2, 30))
+        self.assertEqual(m.next_regen_due(TZ), at(9, 2))
+        self.assertFalse(m.regen_overdue(at(6, 12)))
+        self.assertEqual(m.state.total_regens, 0)  # nur das Datum, keine zusätzliche Regeneration
+        with self.assertRaises(ValueError):
+            m.set_last_regeneration(at(7, 2), now=at(6, 12))  # Zukunft
+        self.assertEqual(m.state.last_regen_at, at(2, 2, 30))
 
     def test_typical_regeneration_volume_is_detected(self):
         """Die Anlage verbraucht meist 52–53 Liter: deutlich über dem Standard-Schwellwert von 45 Litern."""

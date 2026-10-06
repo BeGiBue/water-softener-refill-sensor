@@ -12,9 +12,9 @@ Enthärtungsanlage über den Wasserzähler und rechnet den Salzbestand mit. Zuge
 |---|---|
 | `logic.py` | **Reine Logik ohne Home-Assistant-Importe**: Zeitfenster, Erkennung, Salzbestand, (De-)Serialisierung |
 | `manager.py` | Verbindet die Logik mit Home Assistant: Zähler beobachten, Zeitplan, Speicher, Meldung, Koordinator |
-| `__init__.py` | Setup/Unload/Remove des Eintrags, Dienste (`refill`, `set_salt_stock`, `add_regeneration`) |
+| `__init__.py` | Setup/Unload/Remove des Eintrags, Dienste (`refill`, `set_salt_stock`, `add_regeneration`, `set_last_regeneration`, `set_regenerations_since_refill`) |
 | `config_flow.py` | Einrichtung und Optionen (Selektoren, Validierung) |
-| `entity.py`, `sensor.py`, `binary_sensor.py`, `button.py`, `number.py` | Entitäten (`number.py`: Eingabe der Nachfüllmenge für die Taste; Koordinator-Entitäten, `has_entity_name`, Namen über `translation_key`) |
+| `entity.py`, `sensor.py`, `binary_sensor.py`, `button.py`, `number.py`, `datetime.py` | Entitäten (`number.py`: Eingabe der Nachfüllmenge für die Taste und Korrektur „Regenerationen seit Nachfüllen“; `datetime.py`: Korrektur „Letzte Regeneration“; Koordinator-Entitäten, `has_entity_name`, Namen über `translation_key`) |
 | `services.yaml`, `translations/{de,en}.json` | Dienstbeschreibung, Texte; **de und en immer gemeinsam pflegen** |
 | `manifest.json` | Metadaten; `version` ist die Versionsnummer des Releases |
 

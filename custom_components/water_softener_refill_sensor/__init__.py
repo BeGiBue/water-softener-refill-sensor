@@ -15,11 +15,14 @@ from homeassistant.helpers.storage import Store
 from .const import (
     ATTR_CONFIG_ENTRY,
     ATTR_COUNT,
+    ATTR_DATETIME,
     ATTR_KG,
     DOMAIN,
     PLATFORMS,
     SERVICE_ADD_REGENERATION,
     SERVICE_REFILL,
+    SERVICE_SET_LAST_REGENERATION,
+    SERVICE_SET_REGENS_SINCE_REFILL,
     SERVICE_SET_STOCK,
     STORAGE_VERSION,
     notification_id,
@@ -38,6 +41,8 @@ SCHEMA_REFILL = vol.Schema(
 )
 SCHEMA_SET_STOCK = vol.Schema({**_ENTRY, vol.Required(ATTR_KG): vol.All(vol.Coerce(float), vol.Range(min=0))})
 SCHEMA_ADD = vol.Schema({**_ENTRY, vol.Optional(ATTR_COUNT, default=1): vol.All(vol.Coerce(int), vol.Range(min=1, max=100))})
+SCHEMA_SET_LAST = vol.Schema({**_ENTRY, vol.Required(ATTR_DATETIME): cv.datetime})
+SCHEMA_SET_SINCE = vol.Schema({**_ENTRY, vol.Required(ATTR_COUNT): vol.All(vol.Coerce(int), vol.Range(min=0, max=1000))})
 
 
 def _manager_for(hass: HomeAssistant, call: ServiceCall) -> SoftenerManager:
@@ -69,7 +74,15 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
     hass.services.async_register(DOMAIN, SERVICE_REFILL, _refill, schema=SCHEMA_REFILL)
     hass.services.async_register(DOMAIN, SERVICE_SET_STOCK, _set_stock, schema=SCHEMA_SET_STOCK)
+    async def _set_last(call: ServiceCall) -> None:
+        await _manager_for(hass, call).async_set_last_regeneration(call.data[ATTR_DATETIME])
+
+    async def _set_since(call: ServiceCall) -> None:
+        await _manager_for(hass, call).async_set_regens_since_refill(call.data[ATTR_COUNT])
+
     hass.services.async_register(DOMAIN, SERVICE_ADD_REGENERATION, _add_regeneration, schema=SCHEMA_ADD)
+    hass.services.async_register(DOMAIN, SERVICE_SET_LAST_REGENERATION, _set_last, schema=SCHEMA_SET_LAST)
+    hass.services.async_register(DOMAIN, SERVICE_SET_REGENS_SINCE_REFILL, _set_since, schema=SCHEMA_SET_SINCE)
     return True
 
 

@@ -143,6 +143,10 @@ class FakeDt:
     def as_utc(d):
         return d
 
+    @staticmethod
+    def get_default_time_zone():
+        return TZ
+
 
 @dataclass(frozen=True, kw_only=True)
 class FakeDescription:
@@ -205,5 +209,11 @@ def install() -> None:
     _module("homeassistant.components.sensor", SensorEntityDescription=FakeDescription)
     _module("homeassistant.components.binary_sensor")
     _module("homeassistant.components.button")
-    dt_mod = _module("homeassistant.util.dt", now=FakeDt.now, as_local=FakeDt.as_local, as_utc=FakeDt.as_utc)
+    dt_mod = _module(
+        "homeassistant.util.dt",
+        now=FakeDt.now,
+        as_local=FakeDt.as_local,
+        as_utc=FakeDt.as_utc,
+        get_default_time_zone=FakeDt.get_default_time_zone,
+    )
     _module("homeassistant.util", dt=dt_mod)

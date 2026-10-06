@@ -1,9 +1,9 @@
-"""Eingabe: nachgefüllte Salzmenge (kg), die mit der Taste „Salz nachgefüllt“ bestätigt wird."""
+"""Eingaben: nachgefüllte Salzmenge (kg) und bekannte Regenerationen seit dem Nachfüllen."""
 from __future__ import annotations
 
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfMass
+from homeassistant.const import EntityCategory, UnitOfMass
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -13,7 +13,7 @@ from .entity import EnthaertungEntity
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     manager = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([RefillAmountNumber(manager, entry)])
+    async_add_entities([RefillAmountNumber(manager, entry), RegenerationsSinceRefillNumber(manager, entry)])
 
 
 class RefillAmountNumber(EnthaertungEntity, NumberEntity):
@@ -39,3 +39,25 @@ class RefillAmountNumber(EnthaertungEntity, NumberEntity):
 
     async def async_set_native_value(self, value: float) -> None:
         self._manager.set_refill_input(value)
+
+
+class RegenerationsSinceRefillNumber(EnthaertungEntity, NumberEntity):
+    """Bekannte Regenerationen seit dem letzten Füllen bis voll korrigieren; der Salzbestand wird daraus berechnet."""
+
+    _attr_icon = "mdi:counter"
+    _attr_mode = NumberMode.BOX
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_native_min_value = 0
+    _attr_native_max_value = 1000
+    _attr_native_step = 1
+
+    def __init__(self, manager, entry: ConfigEntry) -> None:
+        super().__init__(manager.coordinator, entry, "regenerations_since_refill_input")
+        self._manager = manager
+
+    @property
+    def native_value(self) -> float:
+        return float(self.coordinator.data["regenerations_since_refill"])
+
+    async def async_set_native_value(self, value: float) -> None:
+        await self._manager.async_set_regens_since_refill(int(round(value)))
