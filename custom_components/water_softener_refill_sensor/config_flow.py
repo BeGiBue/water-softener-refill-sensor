@@ -38,11 +38,10 @@ from .const import (
 
 
 def _number(minimum: float, maximum: float, step: float, unit: str | None = None) -> NumberSelector:
-    return NumberSelector(
-        NumberSelectorConfig(
-            min=minimum, max=maximum, step=step, unit_of_measurement=unit, mode=NumberSelectorMode.BOX
-        )
-    )
+    options: dict[str, Any] = {"min": minimum, "max": maximum, "step": step, "mode": NumberSelectorMode.BOX}
+    if unit is not None:  # Home Assistant verlangt eine Zeichenkette, None ist ungültig (Fehler 400 beim Öffnen)
+        options["unit_of_measurement"] = unit
+    return NumberSelector(NumberSelectorConfig(**options))
 
 
 def _schema(first_setup: bool, defaults: dict[str, Any]) -> vol.Schema:

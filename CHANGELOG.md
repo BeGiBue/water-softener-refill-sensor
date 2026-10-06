@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.1
+
+- Fehler behoben: Beim Hinzufügen der Integration brach der Einrichtungsdialog mit „Der Konfigurationsfluss konnte nicht
+  geladen werden: 400: Bad Request“ ab. Ursache: Das Feld „Warnung bei Restbestand von“ übergab Home Assistant eine leere
+  Einheit (`unit_of_measurement: None`), die Home Assistant ablehnt. Felder ohne Einheit übergeben jetzt keine Einheit mehr.
+- Einrichtung, Optionen, Entitäten, Tasten und Dienste wurden zusätzlich mit einem echten Home Assistant (2026.2) geprüft.
+- Neuer Test, der leere Einheiten im Formular erkennt.
+
 ## 1.1.0
 
 Die Integration heißt jetzt „Water Softener Refill Sensor“ (Domain `water_softener_refill_sensor`, Repository

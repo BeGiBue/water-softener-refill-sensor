@@ -344,6 +344,21 @@ class ConfigFlowHelpers(unittest.TestCase):
         config_flow._schema(True, {})
         config_flow._schema(False, {"water_entity": "sensor.w"})
 
+    def test_number_selector_never_gets_unit_none(self):
+        """Home Assistant lehnt unit_of_measurement=None ab (Formular bricht mit 400: Bad Request ab)."""
+        seen = []
+        original = config_flow.NumberSelectorConfig
+        config_flow.NumberSelectorConfig = lambda **kw: seen.append(kw) or kw
+        try:
+            config_flow._schema(True, {})
+            config_flow._schema(False, {"water_entity": "sensor.w"})
+        finally:
+            config_flow.NumberSelectorConfig = original
+        self.assertTrue(seen)
+        for kw in seen:
+            if "unit_of_measurement" in kw:
+                self.assertIsInstance(kw["unit_of_measurement"], str)
+
 
 if __name__ == "__main__":
     unittest.main()
