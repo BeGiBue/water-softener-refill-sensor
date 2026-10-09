@@ -8,7 +8,18 @@ Funktionsweise
 * Ein Wasserzähler (kumulierter Stand in Litern) wird überwacht. Im Zeitfenster (Standard 02:00 bis 03:00 Uhr) werden
   alle Zuwächse des Zählerstands addiert.
 * Eine Minute nach Ende des Fensters wird ausgewertet: Ist der Verbrauch im Fenster größer als der Schwellwert
-  (Standard 45 Liter), zählt das als eine Regeneration.
+  (Standard 45 Liter), zählt das als eine Regeneration. Erfasst wird bewusst bis zu diesem Auswertezeitpunkt, also
+  einschließlich der Minute nach dem Fensterende, damit verspätet gemeldete Zählerwerte noch zählen.
+* Zeitfenster in echter Zeit: Der Beginn ist die eingestellte Stunde in Ortszeit, die Länge (Ende − Beginn) wird in
+  echten Stunden gerechnet, alle Vergleiche laufen in UTC.
+  Tatsache (vom Nutzer bestätigt): Die Anlage stellt ihre Uhr **nicht** selbst um. Der Nutzer stellt sie von Hand um,
+  in der Praxis nach der Umstellungsnacht; in dieser Nacht regeneriert die Anlage also noch nach ihrer alten Uhr.
+  Genau das trifft die Regel (Europe/Berlin, Fenster 2–3 Uhr):
+  - Oktober: Fenster 02:00 MESZ bis 02:00 MEZ (die erste der beiden Stunden) = 02:00 bis 03:00 der Anlage, die noch
+    auf Sommerzeit steht; keine Doppelerfassung.
+  - März: 02:00 gibt es nicht, der Beginn rückt auf 03:00 MESZ vor, Fenster 03:00 bis 04:00 MESZ = 02:00 bis 03:00 MEZ
+    der Anlage, die noch auf Winterzeit steht.
+  Wird die Anlagenuhr schon vor der Umstellungsnacht umgestellt, liegt ihre Regeneration in dieser Nacht neben dem Fenster.
 * Jede Regeneration verbraucht eine einstellbare Menge Salz. Der Salzbestand ist rein rechnerisch. Beim Nachfüllen
   muss die nachgefüllte Menge (kg) angegeben werden; sie wird zum Bestand addiert (höchstens bis voll).
 """
@@ -16,7 +27,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 
 # Das Fenster wird erst eine Minute nach seinem Ende ausgewertet, damit späte Zählerwerte noch erfasst werden.
@@ -59,12 +70,37 @@ class State:
             self.history = []
 
 
-def _dt(value: str | None) -> datetime | None:
-    return datetime.fromisoformat(value) if value else None
+def _utc(value: datetime) -> datetime:
+    """Zeitpunkt in UTC: Vergleiche gleicher Zeitzone liefen sonst nach Wanduhrzeit (Fehler bei der Zeitumstellung)."""
+    return value.astimezone(timezone.utc)
 
 
-def _d(value: str | None) -> date | None:
-    return date.fromisoformat(value) if value else None
+def _dt(value: Any) -> datetime | None:
+    try:
+        return datetime.fromisoformat(value) if value else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _d(value: Any) -> date | None:
+    try:
+        return date.fromisoformat(value) if value else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _float(value: Any, default: float | None) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _int(value: Any, default: int) -> int:
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return default
 
 
 class SoftenerModel:
@@ -84,15 +120,45 @@ class SoftenerModel:
         return max(0.0, min(float(kg), float(self.settings.capacity_kg)))
 
     def window_start(self, day: date, tz: Any) -> datetime:
-        return datetime.combine(day, time(self.settings.start_hour, 0), tzinfo=tz)
+        """Beginn des Fensters am Tag day (Ortszeit tz).
+
+        Doppelte Ortszeit (Oktober): die erste (fold=0). Nicht existierende Ortszeit (März): fold=0 rechnet mit dem
+        Versatz vor der Umstellung, der Beginn rückt damit um die Lücke nach vorn (02:00 → 03:00 MESZ).
+        """
+        local = datetime.combine(day, time(self.settings.start_hour, 0), tzinfo=tz)
+        return _utc(local).astimezone(tz)
 
     def window_end(self, day: date, tz: Any) -> datetime:
-        """Ende des Erfassungsfensters = Auswertezeitpunkt (Ende des Zeitfensters plus Nachlauf)."""
-        return datetime.combine(day, time(self.settings.end_hour, 0), tzinfo=tz) + EVAL_DELAY
+        """Ende des Erfassungsfensters = Auswertezeitpunkt: Beginn + Fensterlänge in echten Stunden + Nachlauf."""
+        hours = self.settings.end_hour - self.settings.start_hour
+        return (_utc(self.window_start(day, tz)) + timedelta(hours=hours) + EVAL_DELAY).astimezone(tz)
+
+    def window_day(self, now: datetime) -> date | None:
+        """Tag des Fensters, in dem now liegt (Erfassung einschließlich Nachlauf), sonst None."""
+        today = now.date()
+        for day in (today, today - timedelta(days=1)):
+            if _utc(self.window_start(day, now.tzinfo)) <= _utc(now) < _utc(self.window_end(day, now.tzinfo)):
+                return day
+        return None
 
     def in_window(self, now: datetime) -> bool:
-        day = now.date()
-        return self.window_start(day, now.tzinfo) <= now < self.window_end(day, now.tzinfo)
+        return self.window_day(now) is not None
+
+    def last_closed_day(self, now: datetime) -> date:
+        """Tag des zuletzt beendeten Fensters (heute, wenn dessen Auswertezeitpunkt erreicht ist, sonst gestern)."""
+        today = now.date()
+        if _utc(now) >= _utc(self.window_end(today, now.tzinfo)):
+            return today
+        return today - timedelta(days=1)
+
+    def next_evaluation(self, now: datetime) -> datetime:
+        """Nächster Auswertezeitpunkt nach now (für den Zeitplan im Manager)."""
+        today = now.date()
+        for day in (today, today + timedelta(days=1), today + timedelta(days=2)):
+            end = self.window_end(day, now.tzinfo)
+            if _utc(end) > _utc(now):
+                return end
+        raise RuntimeError("kein Auswertezeitpunkt gefunden")  # pragma: no cover
 
     # ------------------------------------------------------------------ Kennzahlen
     @property
@@ -129,7 +195,7 @@ class SoftenerModel:
         due = self.next_regen_due(now.tzinfo)
         if due is None:
             return False
-        return now >= self.window_end(due.date(), now.tzinfo)
+        return _utc(now) >= _utc(self.window_end(due.date(), now.tzinfo))
 
     # ------------------------------------------------------------------ Zählerstand verarbeiten
     def on_meter(self, value_l: float, now: datetime, baseline_only: bool = False) -> list[dict[str, Any]]:
@@ -148,8 +214,8 @@ class SoftenerModel:
         delta = value_l - prev
         if delta <= 0:  # unverändert, oder Zähler zurückgesetzt/getauscht (negativ): nichts zählen
             return events
-        if self.in_window(now):
-            day = now.date()
+        day = self.window_day(now)
+        if day is not None:
             if st.window_date != day:  # neues Fenster beginnt
                 st.window_date = day
                 st.window_usage_l = 0.0
@@ -167,18 +233,18 @@ class SoftenerModel:
         (kein Zählerupdate), wird "0 Liter" festgehalten.
         """
         st = self.state
-        today = now.date()
         wd = st.window_date
         if wd is not None and st.evaluated_date != wd:
-            if now >= self.window_end(wd, now.tzinfo):
+            if _utc(now) >= _utc(self.window_end(wd, now.tzinfo)):
                 return self._finalize(wd, now.tzinfo)
             return []
-        if scheduled and st.evaluated_date != today and now >= self.window_end(today, now.tzinfo):
-            st.window_date = today
+        day = self.last_closed_day(now)
+        if scheduled and (st.evaluated_date is None or st.evaluated_date < day):
+            st.window_date = day
             st.window_usage_l = 0.0
             st.window_crossed_at = None
-            st.evaluated_date = today
-            return [{"type": "window_closed", "date": today, "usage_l": 0.0}]
+            st.evaluated_date = day
+            return [{"type": "window_closed", "date": day, "usage_l": 0.0}]
         return []
 
     def _finalize(self, day: date, tz: Any) -> list[dict[str, Any]]:
@@ -197,12 +263,14 @@ class SoftenerModel:
         st.total_regens += 1
         st.regens_since_refill += 1
         st.stock_kg = self._clamp(round(st.stock_kg - self.settings.per_regen_kg, 4))
-        st.last_regen_at = at
-        st.history = ([at] + (st.history or []))[:HISTORY_LENGTH]
+        # Nachgetragene ältere Regenerationen verschieben die letzte (und damit die 7-Tage-Frist) nicht zurück
+        if st.last_regen_at is None or _utc(at) >= _utc(st.last_regen_at):
+            st.last_regen_at = at
+        st.history = sorted([at] + (st.history or []), key=_utc, reverse=True)[:HISTORY_LENGTH]
 
     # ------------------------------------------------------------------ Eingriffe von Hand
     def add_manual_regeneration(self, at: datetime, count: int = 1) -> None:
-        """Eine (nicht erkannte) Regeneration von Hand nachtragen."""
+        """Eine (nicht erkannte) Regeneration von Hand nachtragen (Zeitpunkt at; der Manager prüft „nicht in der Zukunft“)."""
         for _ in range(max(0, int(count))):
             self._register(at)
 
@@ -235,6 +303,7 @@ class SoftenerModel:
         return round(st.stock_kg - before, 4)
 
     def set_stock(self, kg: float) -> None:
+        """Bestand setzen. „Regenerationen seit Nachfüllen“ bleibt unverändert: beide Werte sind unabhängig."""
         self.state.stock_kg = self._clamp(kg)
 
     def set_last_regeneration(self, at: datetime, now: datetime) -> None:
@@ -246,15 +315,18 @@ class SoftenerModel:
     def set_regens_since_refill(self, count: int) -> None:
         """Bekannte Regenerationen seit dem letzten Füllen bis voll setzen.
 
-        Der Bestand wird daraus neu berechnet: Behältergröße minus count × Salzverbrauch pro Regeneration.
+        Der Bestand ändert sich relativ: um (bisherige Anzahl − count) × Salzverbrauch pro Regeneration, begrenzt auf
+        0 bis Behältergröße. Erneutes Bestätigen desselben Werts ändert nichts, Teil-Nachfüllungen bleiben erhalten.
+        Bei vollem Behälter und Zähler 0 (frisch eingerichtet) ergibt das Behältergröße − count × Verbrauch.
         Der Gesamtzähler wird bei Bedarf auf mindestens count angehoben.
         """
         count = int(count)
         if count < 0:
             raise ValueError("Die Anzahl der Regenerationen darf nicht negativ sein.")
         st = self.state
+        delta = st.regens_since_refill - count
         st.regens_since_refill = count
-        st.stock_kg = self._clamp(round(self.settings.capacity_kg - count * self.settings.per_regen_kg, 4))
+        st.stock_kg = self._clamp(round(st.stock_kg + delta * self.settings.per_regen_kg, 4))
         st.total_regens = max(st.total_regens, count)
 
     # ------------------------------------------------------------------ Speichern / Laden
@@ -276,17 +348,18 @@ class SoftenerModel:
 
     @classmethod
     def from_dict(cls, settings: Settings, data: dict[str, Any]) -> "SoftenerModel":
+        """Gespeicherten Zustand laden. Fehlende oder unlesbare Felder bekommen Standardwerte (ältere Stände)."""
         state = State(
-            stock_kg=float(data.get("stock_kg", settings.capacity_kg)),
-            total_regens=int(data.get("total_regens", 0)),
-            regens_since_refill=int(data.get("regens_since_refill", 0)),
-            last_value_l=data.get("last_value_l"),
+            stock_kg=_float(data.get("stock_kg"), float(settings.capacity_kg)),
+            total_regens=_int(data.get("total_regens"), 0),
+            regens_since_refill=_int(data.get("regens_since_refill"), 0),
+            last_value_l=_float(data.get("last_value_l"), None),
             window_date=_d(data.get("window_date")),
-            window_usage_l=float(data.get("window_usage_l", 0.0)),
+            window_usage_l=_float(data.get("window_usage_l"), 0.0),
             window_crossed_at=_dt(data.get("window_crossed_at")),
             evaluated_date=_d(data.get("evaluated_date")),
             last_regen_at=_dt(data.get("last_regen_at")),
             last_refill_at=_dt(data.get("last_refill_at")),
-            history=[_dt(h) for h in data.get("history", []) if h],
+            history=[h for h in (_dt(x) for x in (data.get("history") or [])) if h is not None],
         )
         return cls(settings, state)

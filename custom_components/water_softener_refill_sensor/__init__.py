@@ -8,7 +8,6 @@ import voluptuous as vol
 from homeassistant.components import persistent_notification
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.storage import Store
 
@@ -25,11 +24,10 @@ from .const import (
     SERVICE_SET_REGENS_SINCE_REFILL,
     SERVICE_SET_STOCK,
     STORAGE_VERSION,
-    notification_id,
-    overdue_notification_id,
+    all_notification_ids,
     storage_key,
 )
-from .manager import SoftenerManager
+from .manager import SoftenerManager, service_error
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -40,7 +38,13 @@ SCHEMA_REFILL = vol.Schema(
     {**_ENTRY, vol.Required(ATTR_KG): vol.All(vol.Coerce(float), vol.Range(min=0, min_included=False))}
 )
 SCHEMA_SET_STOCK = vol.Schema({**_ENTRY, vol.Required(ATTR_KG): vol.All(vol.Coerce(float), vol.Range(min=0))})
-SCHEMA_ADD = vol.Schema({**_ENTRY, vol.Optional(ATTR_COUNT, default=1): vol.All(vol.Coerce(int), vol.Range(min=1, max=100))})
+SCHEMA_ADD = vol.Schema(
+    {
+        **_ENTRY,
+        vol.Optional(ATTR_COUNT, default=1): vol.All(vol.Coerce(int), vol.Range(min=1, max=100)),
+        vol.Optional(ATTR_DATETIME): cv.datetime,
+    }
+)
 SCHEMA_SET_LAST = vol.Schema({**_ENTRY, vol.Required(ATTR_DATETIME): cv.datetime})
 SCHEMA_SET_SINCE = vol.Schema({**_ENTRY, vol.Required(ATTR_COUNT): vol.All(vol.Coerce(int), vol.Range(min=0, max=1000))})
 
@@ -50,13 +54,13 @@ def _manager_for(hass: HomeAssistant, call: ServiceCall) -> SoftenerManager:
     entry_id = call.data.get(ATTR_CONFIG_ENTRY)
     if entry_id:
         if entry_id not in managers:
-            raise ServiceValidationError(f"Unbekannter Eintrag: {entry_id}")
+            raise service_error("unknown_entry", entry_id=entry_id)
         return managers[entry_id]
     if len(managers) == 1:
         return next(iter(managers.values()))
     if not managers:
-        raise ServiceValidationError("Es ist keine Enthärtungsanlage eingerichtet.")
-    raise ServiceValidationError("Mehrere Enthärtungsanlagen eingerichtet: bitte den Eintrag (config_entry) angeben.")
+        raise service_error("no_entry")
+    raise service_error("multiple_entries")
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -70,7 +74,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         await _manager_for(hass, call).async_set_stock(call.data[ATTR_KG])
 
     async def _add_regeneration(call: ServiceCall) -> None:
-        await _manager_for(hass, call).async_add_regeneration(call.data[ATTR_COUNT])
+        await _manager_for(hass, call).async_add_regeneration(call.data[ATTR_COUNT], call.data.get(ATTR_DATETIME))
 
     hass.services.async_register(DOMAIN, SERVICE_REFILL, _refill, schema=SCHEMA_REFILL)
     hass.services.async_register(DOMAIN, SERVICE_SET_STOCK, _set_stock, schema=SCHEMA_SET_STOCK)
@@ -90,23 +94,35 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     manager = SoftenerManager(hass, entry)
     await manager.async_start()
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = manager
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    try:
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    except BaseException:
+        # Einrichtung gescheitert: Listener und Zeitplan wieder abmelden, sonst liefe ein zweiter Manager mit
+        hass.data[DOMAIN].pop(entry.entry_id, None)
+        await manager.async_stop()
+        raise
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     return True
 
 
+def _dismiss_notifications(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    for nid in all_notification_ids(entry.entry_id):
+        persistent_notification.async_dismiss(hass, nid)
+
+
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Entladen (auch Deaktivieren und Neuladen): Meldungen entfernen; beim Laden legt der Manager sie neu an."""
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded:
         manager: SoftenerManager = hass.data[DOMAIN].pop(entry.entry_id)
         await manager.async_stop()
+        _dismiss_notifications(hass, entry)
     return unloaded
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Beim Löschen des Eintrags Meldung und gespeicherte Daten entfernen."""
-    persistent_notification.async_dismiss(hass, notification_id(entry.entry_id))
-    persistent_notification.async_dismiss(hass, overdue_notification_id(entry.entry_id))
+    """Beim Löschen des Eintrags Meldungen und gespeicherte Daten entfernen."""
+    _dismiss_notifications(hass, entry)
     await Store(hass, STORAGE_VERSION, storage_key(entry.entry_id)).async_remove()
 
 

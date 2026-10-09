@@ -16,7 +16,7 @@
           "warn_remaining": "Warnung bei Restbestand von (Regenerationen)"
         },
         "data_description": {
-          "water_entity": "Sensor mit dem kumulierten Zählerstand in Litern oder m³ (z. B. aus dem Energie-Dashboard).",
+          "water_entity": "Sensor mit dem kumulierten Zählerstand in einer Volumeneinheit (L, m³, gal, ft³ …), z. B. aus dem Energie-Dashboard.",
           "capacity_kg": "Wie viel Kilogramm Salz passen in den Salzbehälter?",
           "per_regen_kg": "Wie viel Kilogramm Salz verbraucht eine Regeneration?",
           "initial_stock_kg": "Optional. Leer lassen, wenn der Behälter gerade voll ist.",
@@ -45,13 +45,21 @@
           "window_start_hour": "Zeitfenster von (Uhr)",
           "window_end_hour": "Zeitfenster bis (Uhr)",
           "warn_remaining": "Warnung bei Restbestand von (Regenerationen)"
+        },
+        "data_description": {
+          "water_entity": "Sensor mit dem kumulierten Zählerstand in einer Volumeneinheit (L, m³, gal, ft³ …).",
+          "capacity_kg": "Wie viel Kilogramm Salz passen in den Salzbehälter? Ein größerer Bestand wird auf diesen Wert begrenzt.",
+          "per_regen_kg": "Wie viel Kilogramm Salz verbraucht eine Regeneration?",
+          "threshold_l": "Eine Regeneration zählt, wenn im Zeitfenster mehr als diese Menge Wasser verbraucht wird.",
+          "window_start_hour": "Beginn des Zeitfensters in Ortszeit (Standard 2 Uhr).",
+          "window_end_hour": "Ende des Zeitfensters (Standard 3 Uhr). Muss nach dem Beginn liegen; ausgewertet wird eine Minute danach.",
+          "warn_remaining": "Ab diesem rechnerischen Restbestand erscheint eine Meldung, bis das Nachfüllen bestätigt wird."
         }
       }
     },
     "error": {
       "window_invalid": "Das Ende des Zeitfensters muss nach dem Beginn liegen.",
-      "per_regen_too_large": "Der Salzverbrauch pro Regeneration darf nicht größer als die Behältergröße sein.",
-      "stock_too_large": "Der aktuelle Salzbestand darf nicht größer als die Behältergröße sein."
+      "per_regen_too_large": "Der Salzverbrauch pro Regeneration darf nicht größer als die Behältergröße sein."
     }
   },
   "entity": {
@@ -125,13 +133,13 @@
         },
         "kg": {
           "name": "Nachgefüllte Menge",
-          "description": "Menge in kg, die nachgefüllt wurde."
+          "description": "Menge in kg, die nachgefüllt wurde (größer als 0)."
         }
       }
     },
     "set_salt_stock": {
       "name": "Salzbestand setzen",
-      "description": "Setzt den rechnerischen Salzbestand auf einen bestimmten Wert (z. B. nach einer Kontrolle des Behälters).",
+      "description": "Setzt den rechnerischen Salzbestand auf einen bestimmten Wert (z. B. nach einer Kontrolle des Behälters). „Regenerationen seit Nachfüllen“ bleibt unverändert; beide Werte sind unabhängig.",
       "fields": {
         "config_entry": {
           "name": "Enthärtungsanlage",
@@ -145,7 +153,7 @@
     },
     "add_regeneration": {
       "name": "Regeneration nachtragen",
-      "description": "Trägt eine nicht erkannte Regeneration von Hand nach (Zähler und Salzbestand werden angepasst).",
+      "description": "Trägt eine nicht erkannte Regeneration von Hand nach (Zähler und Salzbestand werden angepasst). Ohne Zeitpunkt gilt jetzt; ein älterer Zeitpunkt verschiebt die letzte Regeneration nicht zurück.",
       "fields": {
         "config_entry": {
           "name": "Enthärtungsanlage",
@@ -154,6 +162,10 @@
         "count": {
           "name": "Anzahl",
           "description": "Anzahl der nachzutragenden Regenerationen."
+        },
+        "datetime": {
+          "name": "Zeitpunkt",
+          "description": "Optional: wann die Regeneration stattfand (nicht in der Zukunft, ohne Zeitzone gilt Ortszeit). Standard: jetzt."
         }
       }
     },
@@ -173,7 +185,7 @@
     },
     "set_regenerations_since_refill": {
       "name": "Regenerationen seit Nachfüllen setzen",
-      "description": "Setzt die bekannten Regenerationen seit dem letzten Füllen bis voll. Der Salzbestand wird daraus berechnet: Behältergröße minus Anzahl × Salzverbrauch pro Regeneration.",
+      "description": "Setzt die bekannten Regenerationen seit dem letzten Füllen bis voll. Der Salzbestand ändert sich relativ dazu: um (bisherige Anzahl − neue Anzahl) × Salzverbrauch pro Regeneration, begrenzt auf 0 bis Behältergröße. Erneutes Bestätigen desselben Werts ändert nichts.",
       "fields": {
         "config_entry": {
           "name": "Enthärtungsanlage",
@@ -184,6 +196,32 @@
           "description": "Regenerationen seit dem letzten Füllen bis voll."
         }
       }
+    }
+  },
+  "issues": {
+    "unknown_unit": {
+      "title": "Einheit des Wasserzählers unbekannt",
+      "description": "Der Wasserzähler {entity} der Enthärtungsanlage „{name}“ meldet die Einheit „{unit}“. Das ist keine bekannte Volumeneinheit (bekannt sind z. B. L, mL, m³, gal, ft³, CCF). Solange das so ist, wird der Zählerstand nicht gezählt und keine Regeneration erkannt.\n\nBitte am Sensor eine Volumeneinheit einstellen oder in den Einstellungen der Integration einen anderen Wasserzähler wählen. Diese Meldung verschwindet, sobald ein Wert mit bekannter Einheit kommt."
+    }
+  },
+  "exceptions": {
+    "refill_amount_required": {
+      "message": "Bitte die nachgefüllte Salzmenge in kg angeben (größer als 0)."
+    },
+    "datetime_in_future": {
+      "message": "Der Zeitpunkt darf nicht in der Zukunft liegen."
+    },
+    "negative_count": {
+      "message": "Die Anzahl der Regenerationen darf nicht negativ sein."
+    },
+    "unknown_entry": {
+      "message": "Unbekannter Eintrag: {entry_id}"
+    },
+    "no_entry": {
+      "message": "Es ist keine Enthärtungsanlage eingerichtet."
+    },
+    "multiple_entries": {
+      "message": "Mehrere Enthärtungsanlagen eingerichtet: bitte den Eintrag (config_entry) angeben."
     }
   }
 }

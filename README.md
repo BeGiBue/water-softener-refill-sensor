@@ -11,7 +11,11 @@ ohne sie genutzt werden.
 - **Regeneration erkennen:** Die Anlage regeneriert nachts, zum Beispiel zwischen 2 und 3 Uhr, und verbraucht dabei
   Wasser. Die Integration überwacht dazu den **Wasserzähler** (kumulierter Stand). Wird im Zeitfenster **mehr als der
   Schwellwert** (Standard 45 Liter) verbraucht, zählt das als **eine** Regeneration. Ausgewertet wird eine Minute nach
-  Ende des Zeitfensters.
+  Ende des Zeitfensters; Zählerwerte aus dieser Minute zählen noch mit (verspätete Meldungen des Zählers).
+  Das Fenster beginnt zur eingestellten Ortszeit und dauert die eingestellten Stunden in echter Zeit. In der Nacht der
+  Zeitumstellung gilt in Deutschland mit 2 bis 3 Uhr: im März 03:00 bis 04:00 Uhr Sommerzeit (02:00 gibt es nicht),
+  im Oktober die erste der beiden Stunden 02:00 bis 03:00 (Sommerzeit). Das passt zur Anlage, deren Uhr sich nicht
+  selbst umstellt und in dieser Nacht noch auf der alten Zeit läuft (siehe „Hinweise und Grenzen“).
 - **Salzbestand rechnen:** Du gibst ein, wie viel Kilogramm Salz in den Behälter passen und wie viel eine Regeneration
   verbraucht. Jede erkannte Regeneration verringert den rechnerischen Bestand.
 - **Warnung:** Erreicht der rechnerische Restbestand die Warnschwelle (Standard **3 Regenerationen**), erscheint eine
@@ -27,9 +31,11 @@ ohne sie genutzt werden.
   Standardeinstellungen zwischen 2 und 3 Uhr. Eine Regeneration verbraucht meist **52–53 Liter**; der Standard-Schwellwert
   von 45 Litern liegt deutlich darunter und erfasst sie sicher.
 - Zusätzlich regeneriert sie **spätestens 7 Tage nach der letzten Regeneration** (Hygiene), auch ohne Wasserverbrauch.
-  Die Integration zeigt dafür „Nächste Regeneration spätestens“ an. Wurde am Fälligkeitstag keine Regeneration erkannt
-  (z. B. weil der Wasserzähler ausgefallen war), erscheinen die Meldung „Regeneration überfällig“ und der Binärsensor. Die
-  Regeneration lässt sich mit `water_softener_refill_sensor.add_regeneration` nachtragen. Gezählt wird sie nicht von selbst.
+  Die Integration zeigt dafür „Nächste Regeneration spätestens“ an (Kalendertag der letzten Regeneration + 7 Tage, Beginn
+  des Zeitfensters). Wurde am Fälligkeitstag keine Regeneration erkannt (z. B. weil der Wasserzähler ausgefallen war),
+  erscheinen nach der Auswertung die Meldung „Regeneration überfällig“ und der Binärsensor. Die Regeneration lässt sich
+  mit `water_softener_refill_sensor.add_regeneration` nachtragen, auch mit dem Zeitpunkt, an dem sie stattfand.
+  Gezählt wird sie nicht von selbst.
 - Der Behälter fasst nominell 25 kg Salz, eine Regeneration verbraucht 1,28 kg (Standardwerte). Weil meist nicht der
   ganze Sack auf einmal hineinpasst, wird in zwei Schritten nachgefüllt: Jede nachgefüllte Menge wird zum Bestand
   addiert. Erst wenn der Behälter danach voll ist (Bestand = Behältergröße, zu große Mengen werden abgeschnitten),
@@ -62,7 +68,7 @@ Den Ordner `custom_components/water_softener_refill_sensor` in dein `config/cust
 | Feld | Bedeutung | Standard |
 |---|---|---|
 | Name | Name des Geräts | Enthärtungsanlage |
-| Wasserzähler | Sensor mit dem **kumulierten Zählerstand** in Litern oder m³ (z. B. der Sensor aus dem Energie-Dashboard) | – |
+| Wasserzähler | Sensor mit dem **kumulierten Zählerstand** in einer Volumeneinheit: L, mL, m³, gal, ft³, CCF (z. B. der Sensor aus dem Energie-Dashboard) | – |
 | Behältergröße | Wie viel kg Salz passen in den Behälter | 25 kg |
 | Salzverbrauch pro Regeneration | kg Salz je Regeneration | 1,28 kg |
 | Aktueller Salzbestand | Nur beim Einrichten, optional. Leer = Behälter voll | – |
@@ -74,7 +80,7 @@ Alle Werte außer dem Namen und dem anfänglichen Bestand lassen sich später ü
 
 **Mitten in einer Füllung starten:** Nach der Einrichtung am Gerät unter **Konfiguration** „Letzte Regeneration korrigieren“
 (Datum vom Display der Anlage) und „Regenerationen seit Nachfüllen korrigieren“ (bisherige Regenerationen seit dem letzten
-Füllen) eintragen. Der Salzbestand wird dann aus der Anzahl berechnet.
+Füllen) eintragen. Bei vollem Anfangsbestand ergibt sich der Salzbestand dann als Behältergröße − Anzahl × Salzverbrauch.
 
 ## Entitäten
 
@@ -87,29 +93,40 @@ Die Entitäten gehören zu einem Gerät mit dem eingestellten Namen (die genauen
 | Salzbestand | Rechnerischer Bestand in kg |
 | Salzfüllstand | Rechnerischer Füllstand in Prozent |
 | Restbestand Regenerationen | Für wie viele Regenerationen das Salz noch reicht (abgerundet) |
-| Letzte Regeneration | Zeitpunkt, an dem der Schwellwert überschritten wurde (Attribut `history`: letzte 10) |
+| Letzte Regeneration | Zeitpunkt, an dem der Schwellwert überschritten wurde, oder der von Hand gesetzte bzw. nachgetragene Zeitpunkt (Attribut `history`: letzte 10, neueste zuerst) |
 | Nächste Regeneration spätestens | 7 Tage nach der letzten Regeneration, Beginn des Zeitfensters (Hygieneregeneration) |
 | Letztes Nachfüllen | Zeitpunkt der letzten Bestätigung (Diagnose) |
 | Verbrauch im Zeitfenster | Wasserverbrauch des letzten bzw. laufenden Zeitfensters (Diagnose) |
 | Salz nachfüllen | Binärsensor „Problem“: an, solange der Restbestand die Warnschwelle erreicht hat |
-| Regeneration überfällig | Binärsensor „Problem“: an, wenn seit mehr als 7 Tagen keine Regeneration erkannt wurde |
+| Regeneration überfällig | Binärsensor „Problem“: an, wenn am Fälligkeitstag (siehe „Nächste Regeneration spätestens“) nach der Auswertung keine Regeneration erkannt wurde |
 | Nachgefüllte Salzmenge | Eingabe in kg (Zahlenfeld): die Menge, die du nachgefüllt hast; wird nach dem Bestätigen auf 0 zurückgesetzt |
 | Behälter voll | Taste: setzt den Salzbestand mit einem Knopfdruck auf voll (Behältergröße), setzt „Regenerationen seit Nachfüllen“ auf 0 und beendet die Meldung; keine Mengeneingabe nötig |
 | Salz nachgefüllt | Taste: bestätigt das Nachfüllen mit der eingegebenen Menge, addiert sie zum Bestand und beendet die Meldung, sobald der Bestand über der Warnschwelle liegt. Bei Menge 0 passiert nichts (Fehlermeldung). |
 | Letzte Regeneration korrigieren | Eingabe Datum und Uhrzeit (Konfiguration): Zeitpunkt der letzten Regeneration von Hand setzen, z. B. vom Display der Anlage. Bestimmt „Nächste Regeneration spätestens“ und „Regeneration überfällig“; zählt keine Regeneration |
-| Regenerationen seit Nachfüllen korrigieren | Eingabe Zahl (Konfiguration): bekannte Regenerationen seit dem letzten Füllen bis voll. Der Salzbestand wird daraus berechnet (Behältergröße − Anzahl × Salzverbrauch pro Regeneration) |
+| Regenerationen seit Nachfüllen korrigieren | Eingabe Zahl (Konfiguration): bekannte Regenerationen seit dem letzten Füllen bis voll. Der Salzbestand ändert sich relativ: um (bisherige − neue Anzahl) × Salzverbrauch pro Regeneration, begrenzt auf 0 bis Behältergröße. Derselbe Wert erneut ändert nichts; Teil-Nachfüllungen bleiben erhalten |
 
 ## Dienste
 
 | Dienst | Zweck |
 |---|---|
 | `water_softener_refill_sensor.refill` | Nachfüllen bestätigen. `kg` (Pflicht, größer als 0): nachgefüllte Menge, wird zum Bestand addiert (höchstens bis voll). |
-| `water_softener_refill_sensor.set_salt_stock` | Rechnerischen Bestand auf einen Wert in kg setzen (z. B. nach Kontrolle des Behälters). |
-| `water_softener_refill_sensor.add_regeneration` | Eine nicht erkannte Regeneration von Hand nachtragen (`count`). |
+| `water_softener_refill_sensor.set_salt_stock` | Rechnerischen Bestand auf einen Wert in kg setzen (z. B. nach Kontrolle des Behälters). „Regenerationen seit Nachfüllen“ bleibt unverändert; beide Werte sind unabhängig. |
+| `water_softener_refill_sensor.add_regeneration` | Eine nicht erkannte Regeneration von Hand nachtragen (`count`, optional `datetime`: wann sie stattfand, nicht in der Zukunft, ohne Zeitzone Ortszeit; Standard jetzt). Ein älterer Zeitpunkt verschiebt die letzte Regeneration nicht zurück. |
 | `water_softener_refill_sensor.set_last_regeneration` | Zeitpunkt der letzten Regeneration setzen (`datetime`, nicht in der Zukunft). Zähler und Bestand bleiben unverändert. |
-| `water_softener_refill_sensor.set_regenerations_since_refill` | Bekannte Regenerationen seit dem letzten Füllen bis voll setzen (`count`); der Salzbestand wird daraus berechnet. |
+| `water_softener_refill_sensor.set_regenerations_since_refill` | Bekannte Regenerationen seit dem letzten Füllen bis voll setzen (`count`); der Salzbestand ändert sich relativ zur bisherigen Anzahl. |
 
-Sind mehrere Anlagen eingerichtet, wird zusätzlich der Eintrag (`config_entry`) angegeben.
+Sind mehrere Anlagen eingerichtet, wird zusätzlich der Eintrag (`config_entry`) angegeben. Fehlermeldungen der Dienste
+erscheinen in der Sprache der Oberfläche (Deutsch oder Englisch).
+
+## Meldungen
+
+| Meldung | Wann | Wie sie verschwindet |
+|---|---|---|
+| Salz nachfüllen | Restbestand ≤ Warnschwelle | Nachfüllen bestätigen, bis der Restbestand über der Schwelle liegt (oder „Behälter voll“) |
+| Regeneration überfällig | Am Fälligkeitstag nach der Auswertung keine Regeneration erkannt | Sobald wieder eine Regeneration gezählt oder nachgetragen wird |
+| Einheit des Wasserzählers unbekannt | Der Wasserzähler meldet keine oder keine bekannte Volumeneinheit; solange wird nichts gezählt | Sobald ein Wert mit bekannter Einheit kommt |
+
+Beim Entladen oder Deaktivieren des Eintrags werden die Meldungen entfernt und beim Laden bei Bedarf neu angelegt.
 
 ## Anbindung an die Karte „Heizungskeller Schema“
 
@@ -124,11 +141,17 @@ Die Karte hat eine Tafel „Enthärtungsanlage“ mit zwei Zeilen. Im Kartenedit
   verbraucht (mehr als der Schwellwert), kann das fälschlich als Regeneration zählen. Eine nicht erkannte Regeneration
   lässt sich mit `water_softener_refill_sensor.add_regeneration` nachtragen, ein falscher Bestand mit `water_softener_refill_sensor.set_salt_stock`.
 - Der Wasserzähler sollte seinen Stand **laufend** aktualisieren (nicht nur alle Stunde), damit der Verbrauch im
-  Zeitfenster erfasst wird. Nach einem Neustart oder wenn der Zähler zwischenzeitlich „nicht verfügbar“ war, wird nur ein
-  neuer Bezugswert gesetzt; der Verbrauch dazwischen wird bewusst nicht gezählt.
+  Zeitfenster erfasst wird. Nach einem Neustart, wenn der Zähler zwischenzeitlich „nicht verfügbar“ war oder seine Einheit
+  wechselt, wird nur ein neuer Bezugswert gesetzt; der Verbrauch dazwischen wird bewusst nicht gezählt.
+- Unbekannte oder fehlende Einheit: Der Zählerstand wird nicht gezählt, es erscheint die Meldung „Einheit des
+  Wasserzählers unbekannt“.
 - Der Salzverbrauch pro Regeneration wird als **konstant** angenommen. Der Bestand ist rein rechnerisch und ersetzt
   keinen Blick in den Salzbehälter.
 - Das Zeitfenster darf nicht über Mitternacht gehen (Beginn muss vor dem Ende liegen).
+- Zeitumstellung: Die Uhr der Anlage stellt sich nicht selbst um. Das Fenster ist so gerechnet, dass es in der
+  Umstellungsnacht zur **alten** Uhrzeit der Anlage passt. Die Anlagenuhr deshalb erst **nach** der Umstellungsnacht
+  (Sonntag nach 03:00 Uhr) umstellen; wird sie schon vorher umgestellt, liegt ihre Regeneration in dieser Nacht neben dem
+  Fenster und wird möglicherweise nicht erkannt (nachtragen mit `add_regeneration`).
 - Zustand (Zähler, Bestand) wird gespeichert und bleibt über Neustarts erhalten.
 - Benötigt Home Assistant 2024.12 oder neuer.
 
@@ -141,6 +164,14 @@ python3 -m unittest discover -s tests -v
 ```
 
 `tests/test_logic.py` prüft die Berechnung, `tests/test_integration_smoke.py` spielt mit Attrappen der Home-Assistant-
-Schnittstellen eine ganze Nacht durch (Zählerstände, Regeneration, Meldung, Bestätigung, Neustart, Dienste). Die Attrappen
-prüfen den eigenen Code, **nicht** die Kompatibilität zur echten Home-Assistant-API; ein Test in einer echten
-Home-Assistant-Instanz ist deshalb nötig. Arbeitsanweisungen für Claude Code stehen in `CLAUDE.md`.
+Schnittstellen eine ganze Nacht durch (Zählerstände, Regeneration, Meldung, Bestätigung, Neustart, Dienste),
+`tests/test_translations.py` vergleicht de/en. Die Attrappen prüfen den eigenen Code, **nicht** die Kompatibilität zur
+echten Home-Assistant-API. Dafür gibt es Tests mit echtem Home Assistant (Einrichtung, Optionen, Entitäten, Dienste,
+Zeitplan inkl. Zeitumstellung, Einheiten, Laden/Entladen), die auch in der CI laufen (2024.12 und 2026.2):
+
+```bash
+pip install -r requirements_test.txt
+python3 -m pytest
+```
+
+Arbeitsanweisungen für Claude Code stehen in `CLAUDE.md`.

@@ -1,15 +1,21 @@
 name: Validate
 
 # Läuft nur bei relevanten Änderungen auf main und bei Pull Requests (keine täglichen Läufe, keine Benachrichtigungs-Flut).
+# Ist ein Lauf auf main grün, startet danach release.yml (workflow_run).
 on:
   push:
     branches: [main]
     paths:
       - 'custom_components/**'
       - 'tests/**'
+      - 'tests_ha/**'
+      - 'requirements_test.txt'
+      - 'pytest.ini'
       - 'hacs.json'
       - 'README.md'
+      - 'CHANGELOG.md'
       - '.github/workflows/validate.yml'
+      - '.github/workflows/release.yml'
   pull_request:
   workflow_dispatch:
 
@@ -41,3 +47,23 @@ jobs:
         with:
           python-version: '3.13'
       - run: python -m unittest discover -s tests -v
+
+  ha-tests:
+    name: Tests mit Home Assistant ${{ matrix.ha }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - ha: '2024.12.0'  # Mindestversion aus hacs.json
+            phcc: '0.13.190'
+          - ha: '2026.2.3'  # wie requirements_test.txt
+            phcc: '0.13.316'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install "pytest-homeassistant-custom-component==${{ matrix.phcc }}"
+      - run: python -c "from homeassistant.const import __version__ as v; assert v == '${{ matrix.ha }}', v"
+      - run: python -m pytest -v

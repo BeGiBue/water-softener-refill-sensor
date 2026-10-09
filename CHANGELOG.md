@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.2.1
+
+Korrekturen aus einem Code-Review.
+
+- Zeitumstellung: Das Zeitfenster wird in echter Zeit gerechnet (Beginn zur eingestellten Ortszeit, Länge in echten
+  Stunden, Vergleiche in UTC); die Auswertung läuft zum echten Fensterende + 1 Minute. Bisher war das Fenster 2 bis 3 Uhr
+  in der Nacht der Umstellung auf Sommerzeit nur eine Minute lang, und bei der Umstellung auf Winterzeit wurde die
+  doppelte Stunde zweimal erfasst. Jetzt: im März 03:00 bis 04:00 Uhr Sommerzeit, im Oktober die erste Stunde 02:00
+  bis 03:00 (Sommerzeit). Die Uhr der Anlage stellt sich nicht selbst um und läuft in der Umstellungsnacht noch auf der
+  alten Zeit; das Fenster entspricht damit genau 02:00 bis 03:00 der Anlage. Die Anlagenuhr erst nach der
+  Umstellungsnacht umstellen.
+- „Regenerationen seit Nachfüllen korrigieren“ (und der Dienst `set_regenerations_since_refill`) ändert den Salzbestand
+  jetzt relativ zur bisherigen Anzahl. Erneutes Bestätigen desselben Werts ändert nichts, Teil-Nachfüllungen gehen nicht
+  mehr verloren.
+- Einheiten des Wasserzählers über die Umrechnung von Home Assistant: zusätzlich gal, ft³, CCF. Unbekannte oder fehlende
+  Einheit wird nicht mehr als Liter gewertet: Der Zählerstand wird nicht gezählt, es erscheint die Meldung „Einheit des
+  Wasserzählers unbekannt“. Wechselt die Einheit, wird nur ein neuer Bezugswert gesetzt.
+- Meldung „Regeneration überfällig“: Text nennt den Fälligkeitstag statt „seit mehr als 7 Tagen“.
+- `add_regeneration` hat ein optionales Feld `datetime` (Zeitpunkt der Regeneration, Standard jetzt). Ein älterer
+  Zeitpunkt verschiebt die letzte Regeneration nicht zurück.
+- Fehlermeldungen der Dienste sind übersetzt (Deutsch/Englisch).
+- Beim Entladen oder Deaktivieren werden die Meldungen entfernt (beim Laden bei Bedarf neu angelegt).
+- `homeassistant.update_entity` schreibt keinen Fehler mehr ins Protokoll.
+- Scheitert die Einrichtung der Plattformen, werden Zeitplan und Listener wieder abgemeldet.
+- Dienst `refill`: kleinste Menge in der Oberfläche 0,01 kg (vorher 0,5 kg), wie im Schema „größer als 0“.
+- Einstellungen: Beschreibungen im Optionsdialog, ungenutzte Fehlermeldung entfernt.
+- Gespeicherter Zustand wird robuster geladen (fehlende oder als Text gespeicherte Werte).
+- Tests mit echtem Home Assistant (2024.12 und 2026.2) in der CI; das Release wird erst nach erfolgreicher Validierung
+  angelegt.
+
 ## 1.2.0
 
 Zustand von Hand eintragen, z. B. beim Einrichten mitten in einer Füllung.
@@ -26,6 +56,8 @@ Zustand von Hand eintragen, z. B. beim Einrichten mitten in einer Füllung.
 
 Die Integration heißt jetzt „Water Softener Refill Sensor“ (Domain `water_softener_refill_sensor`, Repository
 `BeGiBue/water-softener-refill-sensor`). Das Quittieren der Salzmeldung verlangt jetzt die nachgefüllte Menge.
+Weil sich die Domain geändert hat, werden Einträge und gespeicherte Daten der Version 1.0.0 nicht übernommen: Die
+Integration muss neu eingerichtet werden.
 
 - Dienst `water_softener_refill_sensor.refill`: `kg` ist Pflicht (größer als 0). Die Menge wird zum Bestand addiert, höchstens bis zur
   Behältergröße. Ohne Menge gibt es eine Fehlermeldung; „Behälter voll“ ohne Angabe entfällt.

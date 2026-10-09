@@ -3,36 +3,56 @@ name: Release
 # Legt für die Version aus custom_components/water_softener_refill_sensor/manifest.json automatisch Tag und GitHub-Release an,
 # sobald diese Version auf main liegt und noch kein Release dafür existiert. Gibt es das Release schon,
 # werden nur seine Notes aus CHANGELOG.md aktualisiert.
+#
+# Läuft erst, wenn der Workflow „Validate“ (Hassfest, HACS, Tests) für denselben Push auf main grün ist
+# (workflow_run). Ein Push-Auslöser kann nicht auf einen anderen Workflow warten. Hinweis: workflow_run
+# wirkt nur mit der Fassung dieser Datei auf dem Standardzweig. Manuell (workflow_dispatch) wird vorher
+# geprüft, ob „Validate“ für den Commit erfolgreich war.
 on:
-  push:
+  workflow_run:
+    workflows: [Validate]
+    types: [completed]
     branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
   release:
     name: GitHub-Release
     runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    env:
+      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.SHA }}
+      - name: Validierung prüfen (nur bei manuellem Start)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          RESULT=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow validate.yml --commit "$SHA" \
+            --json conclusion --jq '[.[] | select(.conclusion == "success")] | length')
+          if [ "$RESULT" = "0" ]; then
+            echo "Kein erfolgreicher Lauf von „Validate“ für $SHA, kein Release." >&2
+            exit 1
+          fi
       - name: Version ermitteln
         id: v
         run: |
           VERSION=$(python3 -c "import json; print(json.load(open('custom_components/water_softener_refill_sensor/manifest.json'))['version'])")
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          if gh release view "v${VERSION}" >/dev/null 2>&1; then
+          if gh release view "v${VERSION}" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
             echo "Release v${VERSION} existiert bereits."
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
-        env:
-          GH_TOKEN: ${{ github.token }}
-      - name: Tests
-        if: steps.v.outputs.exists == 'false'
-        run: python3 -m unittest discover -s tests
       - name: Release-Notes aus CHANGELOG.md
         run: |
           awk -v v="## ${{ steps.v.outputs.version }}" '$0==v{f=1;next} /^## /{f=0} f' CHANGELOG.md > notes.md
@@ -41,11 +61,9 @@ jobs:
         if: steps.v.outputs.exists == 'false'
         with:
           tag_name: v${{ steps.v.outputs.version }}
-          target_commitish: ${{ github.sha }}
+          target_commitish: ${{ env.SHA }}
           name: v${{ steps.v.outputs.version }}
           body_path: notes.md
       - name: Release-Notes eines vorhandenen Releases aktualisieren
         if: steps.v.outputs.exists == 'true'
-        run: gh release edit "v${{ steps.v.outputs.version }}" --notes-file notes.md
-        env:
-          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "v${{ steps.v.outputs.version }}" --repo "$GITHUB_REPOSITORY" --notes-file notes.md

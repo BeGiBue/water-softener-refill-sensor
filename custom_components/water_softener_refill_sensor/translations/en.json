@@ -16,7 +16,7 @@
           "warn_remaining": "Warn at remaining stock of (regenerations)"
         },
         "data_description": {
-          "water_entity": "Sensor with the cumulative reading in litres or m³ (e.g. from the Energy dashboard).",
+          "water_entity": "Sensor with the cumulative meter reading in a volume unit (L, m³, gal, ft³ …), e.g. from the energy dashboard.",
           "capacity_kg": "How many kilograms of salt fit into the brine tank?",
           "per_regen_kg": "How many kilograms of salt does one regeneration use?",
           "initial_stock_kg": "Optional. Leave empty if the tank is full right now.",
@@ -45,13 +45,21 @@
           "window_start_hour": "Time window from (hour)",
           "window_end_hour": "Time window to (hour)",
           "warn_remaining": "Warn at remaining stock of (regenerations)"
+        },
+        "data_description": {
+          "water_entity": "Sensor with the cumulative meter reading in a volume unit (L, m³, gal, ft³ …).",
+          "capacity_kg": "How many kilograms of salt fit into the salt tank? A larger stock is limited to this value.",
+          "per_regen_kg": "How many kilograms of salt does one regeneration use?",
+          "threshold_l": "A regeneration counts if more than this amount of water is used within the time window.",
+          "window_start_hour": "Start of the time window in local time (default 2 o'clock).",
+          "window_end_hour": "End of the time window (default 3 o'clock). Must be after the start; evaluated one minute later.",
+          "warn_remaining": "From this calculated remaining stock on, a notification appears until the refill is confirmed."
         }
       }
     },
     "error": {
       "window_invalid": "The end of the time window must be after its start.",
-      "per_regen_too_large": "Salt per regeneration must not exceed the tank capacity.",
-      "stock_too_large": "The current salt stock must not exceed the tank capacity."
+      "per_regen_too_large": "Salt per regeneration must not exceed the tank capacity."
     }
   },
   "entity": {
@@ -125,13 +133,13 @@
         },
         "kg": {
           "name": "Amount refilled",
-          "description": "Amount in kg that was added."
+          "description": "Amount in kg that was refilled (greater than 0)."
         }
       }
     },
     "set_salt_stock": {
       "name": "Set salt stock",
-      "description": "Sets the calculated salt stock to a specific value (e.g. after checking the tank).",
+      "description": "Sets the calculated salt stock to a specific value (e.g. after checking the tank). “Regenerations since refill” stays unchanged; both values are independent.",
       "fields": {
         "config_entry": {
           "name": "Water softener",
@@ -145,7 +153,7 @@
     },
     "add_regeneration": {
       "name": "Add regeneration",
-      "description": "Manually adds a regeneration that was not detected (counter and salt stock are adjusted).",
+      "description": "Adds an undetected regeneration manually (counters and salt stock are adjusted). Without a time, now is used; an older time does not move the last regeneration back.",
       "fields": {
         "config_entry": {
           "name": "Water softener",
@@ -154,6 +162,10 @@
         "count": {
           "name": "Count",
           "description": "Number of regenerations to add."
+        },
+        "datetime": {
+          "name": "Time",
+          "description": "Optional: when the regeneration took place (not in the future, without time zone local time). Default: now."
         }
       }
     },
@@ -173,7 +185,7 @@
     },
     "set_regenerations_since_refill": {
       "name": "Set regenerations since refill",
-      "description": "Sets the known regenerations since the tank was last filled up. The salt stock is calculated from it: tank capacity minus count × salt used per regeneration.",
+      "description": "Sets the known regenerations since the last fill to full. The salt stock changes relative to it: by (previous count − new count) × salt per regeneration, limited to 0 to tank size. Confirming the same value again changes nothing.",
       "fields": {
         "config_entry": {
           "name": "Water softener",
@@ -184,6 +196,32 @@
           "description": "Regenerations since the tank was last filled up."
         }
       }
+    }
+  },
+  "issues": {
+    "unknown_unit": {
+      "title": "Unknown unit of the water meter",
+      "description": "The water meter {entity} of the water softener “{name}” reports the unit “{unit}”. This is not a known volume unit (known are e.g. L, mL, m³, gal, ft³, CCF). As long as this is the case, the meter reading is not counted and no regeneration is detected.\n\nPlease set a volume unit on the sensor or choose another water meter in the integration settings. This notice disappears as soon as a value with a known unit arrives."
+    }
+  },
+  "exceptions": {
+    "refill_amount_required": {
+      "message": "Please enter the refilled amount of salt in kg (greater than 0)."
+    },
+    "datetime_in_future": {
+      "message": "The time must not be in the future."
+    },
+    "negative_count": {
+      "message": "The number of regenerations must not be negative."
+    },
+    "unknown_entry": {
+      "message": "Unknown entry: {entry_id}"
+    },
+    "no_entry": {
+      "message": "No water softener is set up."
+    },
+    "multiple_entries": {
+      "message": "Several water softeners are set up: please specify the entry (config_entry)."
     }
   }
 }

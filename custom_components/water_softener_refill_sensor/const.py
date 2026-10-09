@@ -45,3 +45,11 @@ def notification_id(entry_id: str) -> str:
 
 def overdue_notification_id(entry_id: str) -> str:
     return f"{DOMAIN}_{entry_id}_overdue"
+
+
+def unit_notification_id(entry_id: str) -> str:
+    return f"{DOMAIN}_{entry_id}_unit"
+
+
+def all_notification_ids(entry_id: str) -> tuple[str, ...]:
+    return (notification_id(entry_id), overdue_notification_id(entry_id), unit_notification_id(entry_id))
