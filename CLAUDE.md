@@ -23,8 +23,10 @@ Enthärtungsanlage über den Wasserzähler und rechnet den Salzbestand mit. Zuge
 1. Fachlogik (Zählen, Bestand, Zeitfenster) gehört nach `logic.py` und bekommt Tests in `tests/test_logic.py`.
 2. Nach jeder Änderung `python3 -m unittest discover -s tests -v` ausführen. `tests/test_integration_smoke.py` nutzt
    Attrappen der HA-Schnittstellen (`tests/ha_stubs.py`): sie prüfen den eigenen Ablauf, **nicht** die echte HA-API.
-   Bei Änderungen an HA-Schnittstellen (Imports, Basisklassen, Signaturen) deshalb in der Dokumentation von Home
-   Assistant nachsehen und dem Nutzer sagen, dass ein Test in einer echten Instanz nötig ist.
+   **Maßgeblich** für die Anbindung sind die Tests mit echtem Home Assistant in `tests_ha/`
+   (`pip install -r requirements_test.txt`, dann `python3 -m pytest`; die CI prüft 2024.12 und 2026.2). Bei Änderungen
+   an HA-Schnittstellen (Imports, Basisklassen, Signaturen, Formulare) dort einen Test ergänzen. Die Attrappen liefern nur
+   Module aus `ALLOWED_MODULES` in `tests/ha_stubs.py`; ein neues HA-Modul dort bewusst ergänzen.
 3. Das Speicherformat (`Store`, Version 1) nicht brechen: neue Felder in `State`/`from_dict` mit Standardwert ergänzen.
 4. Neue Option = `const.py` (Schlüssel und Standard), `config_flow.py` (Schema, Validierung), `manager.py`
    (`settings_from_entry`), beide Übersetzungen und `README.md`.
@@ -32,7 +34,16 @@ Enthärtungsanlage über den Wasserzähler und rechnet den Salzbestand mit. Zuge
    Eintrag in der Tabelle der `README.md`.
 6. Mindestversion Home Assistant steht in `hacs.json` (`homeassistant`); `config_entry`-Zugriff im Optionsfluss setzt
    2024.11+ voraus.
-7. Texte für den Nutzer sind deutsch; Übersetzungen en gleichwertig halten.
+7. Texte für den Nutzer sind deutsch; Übersetzungen en gleichwertig halten. Fehler der Dienste als
+   `ServiceValidationError` mit `translation_key` (Texte unter `exceptions`, Hilfsfunktion `service_error` in
+   `manager.py`); `tests/test_translations.py` prüft, dass de/en deckungsgleich und alle Schlüssel vorhanden sind.
+8. Zeitfenster (in `logic.py` festgehalten, bitte nicht „reparieren“):
+   - Erfasst wird vom Fensterbeginn bis **Fensterende + 1 Minute** (= Auswertezeitpunkt), damit verspätet gemeldete
+     Zählerwerte noch zählen. Ein Wert genau zum Auswertezeitpunkt zählt nicht mehr.
+   - Fenster in echter Zeit: Beginn = eingestellte Stunde in Ortszeit (doppelte Zeit: die erste; fehlende Zeit: nach
+     vorn verschoben), Länge = Ende − Beginn in echten Stunden, alle Vergleiche in UTC. Annahme: Die Uhr der Anlage
+     stellt bei der Zeitumstellung selbst um. Der Manager plant die Auswertung mit `async_track_point_in_utc_time`.
+   - Einheiten des Wasserzählers rechnet nur der Manager um (`VolumeConverter`); `logic.py` bleibt ohne HA-Importe.
 
 ## Veröffentlichen
 
