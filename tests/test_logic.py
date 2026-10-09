@@ -247,10 +247,6 @@ class SaltStock(unittest.TestCase):
         self.assertTrue(m.needs_refill)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class HygieneRule(unittest.TestCase):
     """Die Anlage regeneriert spätestens 7 Tage nach der letzten Regeneration."""
 
@@ -300,3 +296,142 @@ class HygieneRule(unittest.TestCase):
             feed(m, [(at(5, 23), 1000), (at(6, 2, 10), 1000 + liters / 2), (at(6, 2, 50), 1000 + liters)])
             m.evaluate_pending(at(6, 3, 1), scheduled=True)
             self.assertEqual(m.state.total_regens, 1)
+
+
+UTC = ZoneInfo("UTC")
+
+
+def berlin(y, mo, d, hh, mm=0, ss=0, fold=0):
+    return datetime(y, mo, d, hh, mm, ss, fold=fold, tzinfo=TZ)
+
+
+class DaylightSaving(unittest.TestCase):
+    """Fenster in echter Zeit (UTC): Die Anlage folgt der Ortszeit und stellt selbst um (Annahme, siehe logic.py)."""
+
+    def test_october_night_counts_first_hour_only(self):
+        m = model(capacity_kg=100)
+        day = date(2026, 10, 25)
+        # 02:00 MESZ (00:00 UTC) bis 02:00 MEZ (01:00 UTC), Auswertung 02:01 MEZ
+        self.assertEqual(m.window_start(day, TZ).astimezone(UTC), datetime(2026, 10, 25, 0, 0, tzinfo=UTC))
+        self.assertEqual(m.window_end(day, TZ).astimezone(UTC), datetime(2026, 10, 25, 1, 1, tzinfo=UTC))
+        ev = feed(m, [(berlin(2026, 10, 25, 1, 30), 1000), (berlin(2026, 10, 25, 2, 30), 1025),
+                      (berlin(2026, 10, 25, 2, 30, fold=1), 1050)])  # zweite 02:30 (MEZ) liegt nach dem Fenster
+        self.assertEqual(ev, [{"type": "window_closed", "date": day, "usage_l": 25.0}])
+        self.assertEqual(m.state.total_regens, 0)
+
+    def test_october_night_not_evaluated_too_early(self):
+        m = model(capacity_kg=100)
+        feed(m, [(berlin(2026, 10, 25, 1, 30), 1000), (berlin(2026, 10, 25, 2, 30), 1052)])
+        # 03:01 MESZ gibt es nicht; 02:01 MESZ (erste Stunde) ist noch im Fenster
+        self.assertEqual(m.evaluate_pending(berlin(2026, 10, 25, 2, 1), scheduled=True), [])
+        ev = m.evaluate_pending(berlin(2026, 10, 25, 2, 1, fold=1), scheduled=True)
+        self.assertEqual([e["type"] for e in ev], ["window_closed", "regeneration"])
+
+    def test_march_night_window_is_three_to_four(self):
+        m = model(capacity_kg=100)
+        day = date(2027, 3, 28)
+        self.assertEqual(m.window_start(day, TZ), berlin(2027, 3, 28, 3))
+        self.assertEqual(m.window_end(day, TZ), berlin(2027, 3, 28, 4, 1))
+        feed(m, [(berlin(2027, 3, 28, 1, 59), 1000), (berlin(2027, 3, 28, 3, 10), 1020),
+                 (berlin(2027, 3, 28, 3, 40), 1052)])
+        self.assertEqual(m.evaluate_pending(berlin(2027, 3, 28, 3, 1), scheduled=True), [])  # zu früh
+        ev = m.evaluate_pending(berlin(2027, 3, 28, 4, 1), scheduled=True)
+        self.assertEqual([e["type"] for e in ev], ["window_closed", "regeneration"])
+        self.assertEqual(m.state.last_regen_at, berlin(2027, 3, 28, 3, 40))
+
+    def test_march_due_date_and_overdue(self):
+        m = model(capacity_kg=100)
+        m.add_manual_regeneration(berlin(2027, 3, 21, 2, 30))
+        self.assertEqual(m.next_regen_due(TZ), berlin(2027, 3, 28, 3))
+        self.assertFalse(m.regen_overdue(berlin(2027, 3, 28, 3, 30)))
+        self.assertFalse(m.regen_overdue(berlin(2027, 3, 28, 4, 0, 59)))
+        self.assertTrue(m.regen_overdue(berlin(2027, 3, 28, 4, 1)))
+
+    def test_normal_night_unchanged(self):
+        m = model()
+        day = date(2026, 10, 6)
+        self.assertEqual(m.window_start(day, TZ), at(6, 2))
+        self.assertEqual(m.window_end(day, TZ), at(6, 3, 1))
+
+
+class WindowBoundaries(unittest.TestCase):
+    """Erfasst wird von Fensterbeginn bis Fensterende + 1 Minute (verspätete Zählerwerte, siehe logic.py)."""
+
+    def test_boundaries(self):
+        m = model(capacity_kg=100)
+        feed(m, [(at(6, 1), 1000),
+                 (at(6, 1, 59, 59), 1010),  # vor dem Fenster
+                 (at(6, 2, 0, 0), 1020),    # Beginn: zählt
+                 (at(6, 3, 0, 30), 1060),   # Nachlauf: zählt
+                 (at(6, 3, 1, 0), 1160)])   # Auswertezeitpunkt: zählt nicht mehr
+        self.assertEqual(m.state.window_usage_l, 50.0)
+        self.assertEqual(m.state.total_regens, 1)
+        self.assertEqual(m.state.evaluated_date, date(2026, 10, 6))
+        self.assertEqual(m.state.last_regen_at, at(6, 3, 0, 30))
+
+
+class RegensSinceRefillRelative(unittest.TestCase):
+    """set_regens_since_refill ändert den Bestand relativ zur bisherigen Anzahl."""
+
+    def test_partial_refill_is_kept(self):
+        m = model(capacity_kg=25, per_regen_kg=1.28)
+        m.set_regens_since_refill(16)
+        self.assertAlmostEqual(m.state.stock_kg, 4.52)
+        m.refill(at(7, 9), 20)
+        self.assertAlmostEqual(m.state.stock_kg, 24.52)
+        self.assertEqual(m.state.regens_since_refill, 16)
+        m.set_regens_since_refill(16)  # gleicher Wert: keine Änderung
+        self.assertAlmostEqual(m.state.stock_kg, 24.52)
+        m.set_regens_since_refill(15)  # eine weniger: +1,28 kg, begrenzt auf 25 kg
+        self.assertAlmostEqual(m.state.stock_kg, 25.0)
+        self.assertEqual(m.state.total_regens, 16)
+
+    def test_fresh_setup(self):
+        m = SoftenerModel(Settings(capacity_kg=25, per_regen_kg=1.28), initial_stock_kg=25)
+        m.set_regens_since_refill(16)
+        self.assertAlmostEqual(m.state.stock_kg, 4.52)
+
+    def test_set_stock_keeps_counter(self):
+        m = model(capacity_kg=25, per_regen_kg=1.28)
+        m.set_regens_since_refill(5)
+        m.set_stock(25)
+        self.assertEqual(m.state.regens_since_refill, 5)
+
+
+class ManualRegenerationTime(unittest.TestCase):
+    def test_older_regeneration_does_not_move_last_back(self):
+        m = model(capacity_kg=100)
+        m.add_manual_regeneration(at(6, 2, 30))
+        m.add_manual_regeneration(at(3, 2, 30))  # später nachgetragen, liegt aber davor
+        self.assertEqual(m.state.last_regen_at, at(6, 2, 30))
+        self.assertEqual(m.state.history, [at(6, 2, 30), at(3, 2, 30)])
+        self.assertEqual(m.state.total_regens, 2)
+
+
+class StoredStateCompatibility(unittest.TestCase):
+    def test_empty_and_partial_dicts(self):
+        s = Settings(capacity_kg=25, per_regen_kg=4)
+        m = SoftenerModel.from_dict(s, {})
+        self.assertEqual(m.state.stock_kg, 25.0)
+        m = SoftenerModel.from_dict(s, {"stock_kg": 10, "total_regens": 2})  # Stand ohne spätere Felder
+        self.assertEqual((m.state.stock_kg, m.state.total_regens, m.state.history), (10.0, 2, []))
+
+    def test_strings_and_garbage(self):
+        s = Settings(capacity_kg=25, per_regen_kg=4)
+        m = SoftenerModel.from_dict(s, {
+            "stock_kg": "12.5", "total_regens": "3", "regens_since_refill": None, "last_value_l": "1000",
+            "window_usage_l": "7", "window_date": "kaputt", "last_regen_at": "2026-10-01T02:30:00+02:00",
+            "history": [None, "2026-10-01T02:30:00+02:00", "unsinn"],
+        })
+        self.assertEqual(m.state.stock_kg, 12.5)
+        self.assertEqual(m.state.total_regens, 3)
+        self.assertEqual(m.state.regens_since_refill, 0)
+        self.assertEqual(m.state.last_value_l, 1000.0)
+        self.assertIsNone(m.state.window_date)
+        self.assertEqual(len(m.state.history), 1)
+        m.on_meter(1010, at(6, 2, 10))  # darf nicht mit TypeError abbrechen
+        self.assertEqual(m.state.window_usage_l, 10.0)
+
+
+if __name__ == "__main__":
+    unittest.main()
