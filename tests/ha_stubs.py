@@ -1,11 +1,16 @@
 """Minimale Attrappen der Home-Assistant-Schnittstellen, damit die Anbindung ohne Home Assistant geprüft werden kann.
 
-Das prüft den *eigenen* Code (Imports, Abläufe, Namen), nicht die Kompatibilität zur echten Home-Assistant-API.
+Das prüft den *eigenen* Code (Abläufe, Namen), nicht die Kompatibilität zur echten Home-Assistant-API.
+Maßgeblich für die Anbindung an Home Assistant sind die Tests mit echtem Home Assistant in `tests_ha/`
+(pytest-homeassistant-custom-component). Damit neue Importe nicht unbemerkt durch die Attrappen rutschen, liefert der
+Finder nur die unten in ALLOWED_MODULES aufgeführten Module; ein neues Modul muss hier bewusst ergänzt werden.
 """
 from __future__ import annotations
 
 import importlib.abc
 import importlib.util
+import json
+import os
 import sys
 import types
 from dataclasses import dataclass
@@ -46,8 +51,10 @@ class _AutoModule(types.ModuleType):
             raise AttributeError(name)
         if name[0].isupper():
             obj = _cls(name)
-        else:  # Untermodul (z. B. homeassistant.helpers.config_validation) oder Funktion
-            obj = importlib.import_module(f"{self.__name__}.{name}")
+        elif f"{self.__name__}.{name}" in ALLOWED_MODULES or f"{self.__name__}.{name}" in sys.modules:
+            obj = importlib.import_module(f"{self.__name__}.{name}")  # Untermodul
+        else:  # Funktion (z. B. cv.string, cv.config_entry_only_config_schema)
+            obj = _AutoModule(f"{self.__name__}.{name}")
         setattr(self, name, obj)
         return obj
 
@@ -60,10 +67,26 @@ class _Loader(importlib.abc.Loader):
         pass
 
 
+# Module, die die Integration importieren darf (alles andere schlägt wie ein fehlendes Modul fehl)
+ALLOWED_MODULES = {
+    "voluptuous",
+    "homeassistant.components.datetime",
+    "homeassistant.components.number",
+    "homeassistant.helpers.config_validation",
+    "homeassistant.helpers.device_registry",
+    "homeassistant.helpers.entity_platform",
+    "homeassistant.helpers.selector",
+    "homeassistant.helpers.translation",
+    "homeassistant.helpers.typing",
+}
+
+
 class _Finder(importlib.abc.MetaPathFinder):
     def find_spec(self, name, path, target=None):
-        if name == "voluptuous" or name.startswith("homeassistant"):
+        if name in ALLOWED_MODULES:
             return importlib.util.spec_from_loader(name, _Loader(), is_package=True)
+        if name == "homeassistant" or name.startswith("homeassistant."):
+            raise ModuleNotFoundError(f"Attrappe fehlt für {name} (in tests/ha_stubs.py ergänzen)")
         return None
 
 
@@ -96,9 +119,13 @@ class FakeStore:
 
 
 class FakeCoordinator:
-    def __init__(self, hass, logger, *, config_entry=None, name=None, **kw):
+    def __init__(self, hass, logger, *, config_entry=None, name=None, update_method=None, **kw):
         self.data = None
         self.updates = 0
+        self.update_method = update_method
+
+    async def async_request_refresh(self):
+        self.async_set_updated_data(await self.update_method())
 
     def async_set_updated_data(self, data):
         self.data = data
@@ -141,7 +168,7 @@ class FakeDt:
 
     @staticmethod
     def as_utc(d):
-        return d
+        return d.astimezone(ZoneInfo("UTC"))
 
     @staticmethod
     def get_default_time_zone():
@@ -166,7 +193,57 @@ class FakeConfigFlow:
 
 
 class ServiceValidationError(Exception):
-    pass
+    def __init__(self, *args, translation_domain=None, translation_key=None, translation_placeholders=None):
+        super().__init__(*args)
+        self.translation_domain = translation_domain
+        self.translation_key = translation_key
+        self.translation_placeholders = translation_placeholders
+
+
+class FakeVolumeConverter:
+    _TO_L = {"L": 1.0, "mL": 0.001, "m³": 1000.0, "gal": 3.785411784, "ft³": 28.316846592, "CCF": 2831.6846592,
+             "MCF": 28316.846592, "fl. oz.": 0.0295735295625}
+    VALID_UNITS = set(_TO_L)
+
+    @classmethod
+    def convert(cls, value, from_unit, to_unit):
+        return value * cls._TO_L[from_unit] / cls._TO_L[to_unit]
+
+
+_TRANSLATIONS = os.path.join(
+    os.path.dirname(__file__), "..", "custom_components", "water_softener_refill_sensor", "translations"
+)
+
+
+async def fake_async_get_translations(hass, language, category, integrations=None, config_flow=None):
+    """Wie Home Assistant: flache Schlüssel component.<domain>.<category>.…, Rückfall auf Englisch."""
+    out = {}
+    for lang in ("en", language):
+        path = os.path.join(_TRANSLATIONS, f"{lang}.json")
+        if not os.path.exists(path):
+            continue
+
+        def walk(node, prefix):
+            for key, value in node.items():
+                if isinstance(value, dict):
+                    walk(value, f"{prefix}.{key}")
+                else:
+                    out[f"{prefix}.{key}"] = value
+
+        with open(path, encoding="utf-8") as fh:
+            walk(json.load(fh).get(category, {}), f"component.water_softener_refill_sensor.{category}")
+    return out
+
+
+def _track_point(hass, action, point):
+    entry = (point, action)
+    hass.timers.append(entry)
+
+    def cancel():
+        if entry in hass.timers:
+            hass.timers.remove(entry)
+
+    return cancel
 
 
 def install() -> None:
@@ -188,10 +265,9 @@ def install() -> None:
     _module(
         "homeassistant.helpers.event",
         async_track_state_change_event=lambda hass, ids, action: (hass.state_cbs.append(action) or (lambda: None)),
-        async_track_time_change=lambda hass, action, hour=None, minute=None, second=None: (
-            hass.time_cbs.append((hour, minute, second, action)) or (lambda: None)
-        ),
+        async_track_point_in_utc_time=_track_point,
     )
+    _module("homeassistant.helpers.translation", async_get_translations=fake_async_get_translations)
     _module(
         "homeassistant.helpers.update_coordinator",
         DataUpdateCoordinator=FakeCoordinator,
@@ -209,6 +285,7 @@ def install() -> None:
     _module("homeassistant.components.sensor", SensorEntityDescription=FakeDescription)
     _module("homeassistant.components.binary_sensor")
     _module("homeassistant.components.button")
+    _module("homeassistant.util.unit_conversion", VolumeConverter=FakeVolumeConverter)
     dt_mod = _module(
         "homeassistant.util.dt",
         now=FakeDt.now,

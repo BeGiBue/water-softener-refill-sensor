@@ -61,7 +61,7 @@ class FakeHass:
         self.config = types.SimpleNamespace(language="de")
         self.states = FakeStates()
         self.state_cbs = []
-        self.time_cbs = []
+        self.timers = []  # (Zeitpunkt UTC, Aktion) aus async_track_point_in_utc_time
         self.services = types.SimpleNamespace(registered={}, async_register=self._register)
         calls = []
         self.calls = calls
@@ -117,9 +117,14 @@ def push(hass, value, when, unit="L"):
 
 
 def window_end(hass, when):
+    """Uhr auf when stellen und alle bis dahin fälligen Zeitpläne auslösen (wie Home Assistant)."""
     FakeDt._now = when
-    for hour, minute, second, cb in hass.time_cbs:
-        cb(when)
+    while True:
+        due = sorted((t for t in hass.timers if t[0] <= when), key=lambda t: t[0])
+        if not due:
+            return
+        hass.timers.remove(due[0])
+        due[0][1](due[0][0])
 
 
 class NightScenario(unittest.TestCase):
@@ -145,8 +150,8 @@ class NightScenario(unittest.TestCase):
         mgr = hass.data["water_softener_refill_sensor"]["abc123"]
         self.assertEqual(mgr.coordinator.data["regenerations_left"], 4)
         self.assertEqual(FakeNotifications.active, {})  # noch keine Meldung
-        # Zeitplan: Auswertung um 03:01:00
-        self.assertEqual([(h, m, s) for h, m, s, _ in hass.time_cbs], [(3, 1, 0)])
+        # Zeitplan: Auswertung um 03:01:00 Ortszeit, als Zeitpunkt in UTC
+        self.assertEqual([t[0] for t in hass.timers], [local(6, 3, 1).astimezone(ZoneInfo("UTC"))])
 
         for when, value in [(local(6, 2, 5), 1010), (local(6, 2, 20), 1040), (local(6, 2, 40), 1070), (local(6, 2, 58), 1085)]:
             push(hass, value, when)
@@ -372,6 +377,167 @@ class NightScenario(unittest.TestCase):
         note = FakeNotifications.active["water_softener_refill_sensor_abc123_low_salt"]
         self.assertEqual(note["title"], "Refill salt")
         self.assertIn("2 more regenerations", note["message"])
+
+
+class ReviewFixes(unittest.TestCase):
+    """Befunde aus dem Review 1.2.0 (Ablauf mit Attrappen; echte HA-Prüfung in tests_ha/)."""
+
+    def setUp(self):
+        FakeStore.DATA.clear()
+        FakeNotifications.active.clear()
+        FakeNotifications.log.clear()
+        self.hass = FakeHass()
+        self.entry = FakeEntry(capacity_kg=100.0)
+        FakeDt._now = local(5, 22)
+        self.hass.states.set("sensor.wasser_total", FakeState("1000", "L", local(5, 21)))
+
+    def run_async(self, coro):
+        return asyncio.run(coro)
+
+    async def _setup(self):
+        await async_setup(self.hass, {})
+        await async_setup_entry(self.hass, self.entry)
+        return self.hass.data["water_softener_refill_sensor"]["abc123"]
+
+    def test_overdue_text_names_due_day(self):  # N1
+        async def run():
+            mgr = await self._setup()
+            await mgr.async_set_last_regeneration(local(5, 2, 30))
+            window_end(self.hass, local(12, 3, 1))
+            msg = FakeNotifications.active["water_softener_refill_sensor_abc123_overdue"]["message"]
+            self.assertIn("am Fälligkeitstag (12.10.2026)", msg)
+            self.assertNotIn("mehr als 7 Tagen", msg)
+        self.run_async(run())
+
+    def test_add_regeneration_with_datetime(self):  # N1
+        async def run():
+            mgr = await self._setup()
+            FakeDt._now = local(9, 15)
+            reg = self.hass.services.registered["add_regeneration"]
+            await reg(types.SimpleNamespace(data={"count": 1, "datetime": datetime(2026, 10, 7, 2, 30)}))
+            self.assertEqual(mgr.coordinator.data["last_regeneration"], local(7, 2, 30))
+            self.assertEqual(mgr.coordinator.data["next_regeneration_due"], local(14, 2))
+            await reg(types.SimpleNamespace(data={"count": 1}))  # ohne Zeitpunkt: jetzt
+            self.assertEqual(mgr.coordinator.data["last_regeneration"], local(9, 15))
+            with self.assertRaises(ha_stubs.ServiceValidationError) as ctx:
+                await reg(types.SimpleNamespace(data={"count": 1, "datetime": datetime(2026, 10, 10, 2, 30)}))
+            self.assertEqual(ctx.exception.translation_key, "datetime_in_future")
+            self.assertEqual(mgr.coordinator.data["total_regenerations"], 2)
+        self.run_async(run())
+
+    def test_unload_dismisses_and_reload_recreates(self):  # N3
+        async def run():
+            mgr = await self._setup()
+            await mgr.async_set_stock(1.0)
+            key = "water_softener_refill_sensor_abc123_low_salt"
+            self.assertIn(key, FakeNotifications.active)
+            await async_unload_entry(self.hass, self.entry)
+            self.assertNotIn(key, FakeNotifications.active)
+            self.assertEqual(self.hass.timers, [])  # Zeitplan abgemeldet
+            await async_setup_entry(self.hass, self.entry)
+            self.assertIn(key, FakeNotifications.active)
+        self.run_async(run())
+
+    def test_errors_are_translated(self):  # N4
+        async def run():
+            mgr = await self._setup()
+            call = lambda **data: types.SimpleNamespace(data=data)  # noqa: E731
+            cases = [
+                (mgr.async_refill(0), "refill_amount_required"),
+                (mgr.async_set_last_regeneration(local(20, 2)), "datetime_in_future"),
+                (mgr.async_set_regens_since_refill(-1), "negative_count"),
+            ]
+            for coro, key in cases:
+                with self.assertRaises(ha_stubs.ServiceValidationError) as ctx:
+                    await coro
+                self.assertEqual((ctx.exception.translation_domain, ctx.exception.translation_key),
+                                 ("water_softener_refill_sensor", key))
+            with self.assertRaises(ha_stubs.ServiceValidationError) as ctx:
+                _manager_for(self.hass, call(config_entry="gibt-es-nicht"))
+            self.assertEqual(ctx.exception.translation_key, "unknown_entry")
+            self.assertEqual(ctx.exception.translation_placeholders, {"entry_id": "gibt-es-nicht"})
+        self.run_async(run())
+
+    def test_two_entries_need_config_entry(self):
+        async def run():
+            mgr = await self._setup()
+            second = FakeEntry()
+            second.entry_id = "xyz789"
+            await async_setup_entry(self.hass, second)
+            call = lambda **data: types.SimpleNamespace(data=data)  # noqa: E731
+            with self.assertRaises(ha_stubs.ServiceValidationError) as ctx:
+                _manager_for(self.hass, call())
+            self.assertEqual(ctx.exception.translation_key, "multiple_entries")
+            self.assertIs(_manager_for(self.hass, call(config_entry="abc123")), mgr)
+            await self.hass.services.registered["add_regeneration"](call(config_entry="xyz789", count=1))
+            self.assertEqual(mgr.coordinator.data["total_regenerations"], 0)
+            self.assertEqual(self.hass.data["water_softener_refill_sensor"]["xyz789"].model.state.total_regens, 1)
+        self.run_async(run())
+
+    def test_unknown_unit_is_not_counted(self):  # M3
+        async def run():
+            mgr = await self._setup()
+            key = "water_softener_refill_sensor_abc123_unit"
+            push(self.hass, 1010, local(6, 2, 5))
+            push(self.hass, 2000, local(6, 2, 10), unit="Kubikliter")
+            self.assertIn(key, FakeNotifications.active)
+            self.assertIn("Kubikliter", FakeNotifications.active[key]["message"])
+            self.assertEqual(FakeNotifications.active[key]["title"], "Einheit des Wasserzählers unbekannt")
+            push(self.hass, 2100, local(6, 2, 20), unit=None)  # fehlende Einheit: ebenfalls nicht zählen
+            push(self.hass, 2200, local(6, 2, 30), unit="L")  # bekannte Einheit: nur Bezugswert, Meldung weg
+            self.assertNotIn(key, FakeNotifications.active)
+            push(self.hass, 2250, local(6, 2, 40), unit="L")
+            self.assertEqual(mgr.coordinator.data["window_usage_l"], 60.0)  # 10 + 50
+        self.run_async(run())
+
+    def test_unit_change_sets_baseline_and_gallons_count(self):  # M3
+        async def run():
+            mgr = await self._setup()
+            push(self.hass, 1010, local(6, 2, 5))  # +10 L
+            push(self.hass, 300.0, local(6, 2, 10), unit="gal")  # Wechsel: nur Bezugswert
+            push(self.hass, 314.0, local(6, 2, 30), unit="gal")  # +14 gal ≈ 53 L
+            self.assertAlmostEqual(mgr.coordinator.data["window_usage_l"], 63.0, places=0)
+            window_end(self.hass, local(6, 3, 1))
+            self.assertEqual(mgr.coordinator.data["total_regenerations"], 1)
+        self.run_async(run())
+
+    def test_failed_platform_setup_stops_manager(self):  # N6
+        async def run():
+            await async_setup(self.hass, {})
+
+            async def boom(entry, platforms):
+                raise RuntimeError("Plattform kaputt")
+
+            ok = self.hass.config_entries.async_forward_entry_setups
+            self.hass.config_entries.async_forward_entry_setups = boom
+            with self.assertRaises(RuntimeError):
+                await async_setup_entry(self.hass, self.entry)
+            self.assertEqual(self.hass.timers, [])
+            self.assertNotIn("abc123", self.hass.data["water_softener_refill_sensor"])
+            self.hass.config_entries.async_forward_entry_setups = ok
+            await async_setup_entry(self.hass, self.entry)
+            self.assertEqual(len(self.hass.timers), 1)
+        self.run_async(run())
+
+    def test_update_entity_refresh(self):  # N2
+        async def run():
+            mgr = await self._setup()
+            await mgr.coordinator.async_request_refresh()
+            self.assertEqual(mgr.coordinator.data["salt_stock_kg"], 100.0)
+        self.run_async(run())
+
+    def test_options_change_during_open_window(self):
+        async def run():
+            mgr = await self._setup()
+            push(self.hass, 1030, local(6, 2, 10))  # 30 L bei Schwelle 45
+            await mgr.async_stop()  # Optionen geändert: Neuladen mit Schwelle 25
+            self.entry.options = {"threshold_l": 25}
+            await async_setup_entry(self.hass, self.entry)
+            mgr2 = self.hass.data["water_softener_refill_sensor"]["abc123"]
+            self.assertEqual(mgr2.model.state.window_usage_l, 30.0)
+            window_end(self.hass, local(6, 3, 1))
+            self.assertEqual(mgr2.coordinator.data["total_regenerations"], 1)
+        self.run_async(run())
 
 
 class ConfigFlowHelpers(unittest.TestCase):

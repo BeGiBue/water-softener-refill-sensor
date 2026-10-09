@@ -10,10 +10,12 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import Event, HomeAssistant, State, callback
 from homeassistant.exceptions import ServiceValidationError
-from homeassistant.helpers.event import async_track_state_change_event, async_track_time_change
+from homeassistant.helpers.event import async_track_point_in_utc_time, async_track_state_change_event
 from homeassistant.helpers.storage import Store
+from homeassistant.helpers.translation import async_get_translations
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
+from homeassistant.util.unit_conversion import VolumeConverter
 
 from .const import (
     CONF_CAPACITY_KG,
@@ -36,13 +38,39 @@ from .const import (
     notification_id,
     overdue_notification_id,
     storage_key,
+    unit_notification_id,
 )
-from .logic import EVAL_DELAY, Settings, SoftenerModel
+from .logic import Settings, SoftenerModel
 
 _LOGGER = logging.getLogger(__name__)
 
-# Einheit des Wasserzählers -> Faktor in Liter (Schlüssel kleingeschrieben)
-UNIT_TO_LITERS = {"l": 1.0, "ℓ": 1.0, "liter": 1.0, "m³": 1000.0, "m3": 1000.0, "ml": 0.001}
+LITERS = "L"
+# Schreibweisen, die Home Assistant nicht als Volumeneinheit kennt, die aber eindeutig sind (Kleinschreibung)
+UNIT_ALIASES = {"l": "L", "ℓ": "L", "liter": "L", "liters": "L", "ml": "mL", "m3": "m³", "m³": "m³"}
+
+
+def normalize_volume_unit(unit: Any) -> str | None:
+    """Einheit des Wasserzählers als Volumeneinheit von Home Assistant (L, mL, m³, gal, ft³, CCF …), sonst None."""
+    if not isinstance(unit, str) or not unit.strip():
+        return None
+    unit = unit.strip()
+    if unit in VolumeConverter.VALID_UNITS:
+        return unit
+    if (alias := UNIT_ALIASES.get(unit.lower())) is not None:
+        return alias
+    for valid in VolumeConverter.VALID_UNITS:
+        if valid.lower() == unit.lower():
+            return valid
+    return None
+
+
+def service_error(key: str, **placeholders: Any) -> ServiceValidationError:
+    """Übersetzte Fehlermeldung (Texte unter „exceptions“ in translations/*.json)."""
+    return ServiceValidationError(
+        translation_domain=DOMAIN,
+        translation_key=key,
+        translation_placeholders={k: str(v) for k, v in placeholders.items()} or None,
+    )
 
 MESSAGES = {
     "de": {
@@ -59,10 +87,12 @@ MESSAGES = {
         "many": "Regenerationen",
         "overdue_title": "Regeneration überfällig",
         "overdue_message": (
-            "Bei der Enthärtungsanlage „{name}“ wurde seit mehr als 7 Tagen keine Regeneration erkannt "
-            "(letzte erkannte Regeneration: {last}). Die Anlage regeneriert spätestens nach 7 Tagen.\n\n"
+            "Bei der Enthärtungsanlage „{name}“ wurde am Fälligkeitstag ({due}) keine Regeneration erkannt "
+            "(letzte erkannte Regeneration: {last}). Die Anlage regeneriert spätestens 7 Tage nach der letzten "
+            "Regeneration.\n\n"
             "Mögliche Ursachen: Der Wasserzähler war im Zeitfenster nicht verfügbar, oder die Anlage ist gestört. "
-            "Eine tatsächlich erfolgte Regeneration lässt sich mit dem Dienst `water_softener_refill_sensor.add_regeneration` nachtragen. "
+            "Eine tatsächlich erfolgte Regeneration lässt sich mit dem Dienst `water_softener_refill_sensor.add_regeneration` "
+            "nachtragen (optional mit Zeitpunkt `datetime`). "
             "Diese Meldung verschwindet, sobald wieder eine Regeneration gezählt wird."
         ),
     },
@@ -79,10 +109,12 @@ MESSAGES = {
         "many": "regenerations",
         "overdue_title": "Regeneration overdue",
         "overdue_message": (
-            "No regeneration has been detected for the water softener “{name}” for more than 7 days "
-            "(last detected regeneration: {last}). The softener regenerates at the latest after 7 days.\n\n"
+            "No regeneration was detected for the water softener “{name}” on the due day ({due}) "
+            "(last detected regeneration: {last}). The softener regenerates at the latest 7 days after the last "
+            "regeneration.\n\n"
             "Possible causes: the water meter was unavailable during the time window, or the softener is faulty. "
-            "A regeneration that did take place can be added with the service `water_softener_refill_sensor.add_regeneration`. "
+            "A regeneration that did take place can be added with the service `water_softener_refill_sensor.add_regeneration` "
+            "(optionally with the time `datetime`). "
             "This notice disappears as soon as a regeneration is counted again."
         ),
     },
@@ -113,12 +145,21 @@ class SoftenerManager:
         self.settings = settings_from_entry(entry)
         self.model = SoftenerModel(self.settings, initial_stock_kg=self._initial_stock)
         self._store = Store(hass, STORAGE_VERSION, storage_key(entry.entry_id))
+        # update_method liefert nur den aktuellen Schnappschuss (kein Polling); so schreibt
+        # homeassistant.update_entity keinen Fehler ins Protokoll
         self.coordinator: DataUpdateCoordinator = DataUpdateCoordinator(
-            hass, _LOGGER, config_entry=entry, name=f"{DOMAIN}_{entry.entry_id}"
+            hass,
+            _LOGGER,
+            config_entry=entry,
+            name=f"{DOMAIN}_{entry.entry_id}",
+            update_method=self._async_update_data,
         )
         self._unsubs: list[Callable[[], None]] = []
+        self._unsub_timer: Callable[[], None] | None = None
         self._need_baseline = True  # nach dem Start zuerst nur einen Bezugswert setzen
-        self._unit_warned = False
+        self._last_unit: str | None = None  # Einheit des letzten gezählten Werts
+        self._unit_problem: str | None = None  # unbekannte Einheit, für die eine Meldung besteht
+        self._issue_texts: dict[str, str] = {}
         self.refill_input_kg: float = 0.0  # Eingabe der Nachfüllmenge für die Taste (nicht gespeichert)
 
     # ------------------------------------------------------------------ Start / Stopp
@@ -126,6 +167,7 @@ class SoftenerManager:
         stored = await self._store.async_load()
         if stored:
             self.model = SoftenerModel.from_dict(self.settings, stored)
+        self._issue_texts = await async_get_translations(self.hass, self.hass.config.language, "issues", {DOMAIN})
         now = dt_util.now()
 
         # Ein während der Abwesenheit beendetes Zeitfenster nachträglich auswerten
@@ -134,15 +176,7 @@ class SoftenerManager:
             self._log_events(events)
 
         self._unsubs.append(async_track_state_change_event(self.hass, [self.water_entity], self._handle_state_event))
-        self._unsubs.append(
-            async_track_time_change(
-                self.hass,
-                self._handle_window_end,
-                hour=self.settings.end_hour,
-                minute=int(EVAL_DELAY.total_seconds() // 60),
-                second=0,
-            )
-        )
+        self._schedule_evaluation(now)
 
         # aktuellen Zählerstand als Bezugswert übernehmen
         current = self.hass.states.get(self.water_entity)
@@ -154,40 +188,74 @@ class SoftenerManager:
         self._save_later()
 
     async def async_stop(self) -> None:
+        self._cancel_timer()
         for unsub in self._unsubs:
             unsub()
         self._unsubs.clear()
         await self._store.async_save(self.model.to_dict())
 
-    # ------------------------------------------------------------------ Wasserzähler
-    def _to_liters(self, state: State) -> float | None:
-        try:
-            value = float(state.state)
-        except (TypeError, ValueError):
-            return None
-        unit = str(state.attributes.get("unit_of_measurement") or "L").strip().lower()
-        factor = UNIT_TO_LITERS.get(unit)
-        if factor is None:
-            if not self._unit_warned:
-                _LOGGER.warning(
-                    "Einheit %r von %s ist unbekannt, es wird Liter angenommen", unit, self.water_entity
-                )
-                self._unit_warned = True
-            factor = 1.0
-        return value * factor
+    # ------------------------------------------------------------------ Zeitplan
+    def _schedule_evaluation(self, now: datetime) -> None:
+        """Auswertung zum nächsten Fensterende + 1 Minute in echter Zeit (UTC), auch in den Umstellungsnächten."""
+        self._cancel_timer()
+        point = self.model.next_evaluation(dt_util.as_local(now))
+        self._unsub_timer = async_track_point_in_utc_time(self.hass, self._handle_window_end, dt_util.as_utc(point))
 
+    def _cancel_timer(self) -> None:
+        if self._unsub_timer is not None:
+            self._unsub_timer()
+            self._unsub_timer = None
+
+    # ------------------------------------------------------------------ Wasserzähler
     def _process_state(self, state: State, now) -> None:
         if state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
             self._need_baseline = True
             return
-        liters = self._to_liters(state)
-        if liters is None:
+        try:
+            value = float(state.state)
+        except (TypeError, ValueError):
             return
-        events = self.model.on_meter(liters, now, baseline_only=self._need_baseline)
+        raw_unit = state.attributes.get("unit_of_measurement")
+        unit = normalize_volume_unit(raw_unit)
+        if unit is None:
+            # Unbekannte oder fehlende Einheit: nichts zählen; der nächste Wert mit bekannter Einheit ist Bezugswert
+            self._need_baseline = True
+            self._report_unit_problem(str(raw_unit) if raw_unit else "–")
+            return
+        self._clear_unit_problem()
+        baseline = self._need_baseline or (self._last_unit is not None and unit != self._last_unit)
+        self._last_unit = unit
+        liters = VolumeConverter.convert(value, unit, LITERS)
+        events = self.model.on_meter(liters, now, baseline_only=baseline)
         self._need_baseline = False
         if events:
             self._log_events(events)
             self._update_notification()
+
+    def _report_unit_problem(self, unit: str) -> None:
+        if self._unit_problem == unit:
+            return
+        self._unit_problem = unit
+        _LOGGER.warning(
+            "Einheit %r von %s ist keine bekannte Volumeneinheit; der Zählerstand wird nicht gezählt", unit, self.water_entity
+        )
+        prefix = f"component.{DOMAIN}.issues.unknown_unit"
+        placeholders = {"name": self.entry.title, "entity": self.water_entity, "unit": unit}
+        title = self._issue_texts.get(f"{prefix}.title", "Unknown unit of the water meter")
+        message = self._issue_texts.get(
+            f"{prefix}.description", "The unit {unit} of {entity} is not a known volume unit."
+        )
+        persistent_notification.async_create(
+            self.hass,
+            message.format(**placeholders),
+            title=title.format(**placeholders),
+            notification_id=unit_notification_id(self.entry.entry_id),
+        )
+
+    def _clear_unit_problem(self) -> None:
+        if self._unit_problem is not None:
+            self._unit_problem = None
+            persistent_notification.async_dismiss(self.hass, unit_notification_id(self.entry.entry_id))
 
     @callback
     def _handle_state_event(self, event: Event) -> None:
@@ -199,14 +267,17 @@ class SoftenerManager:
         self._save_later()
 
     @callback
-    def _handle_window_end(self, now) -> None:
-        """Planmäßige Auswertung kurz nach dem Ende des Zeitfensters."""
-        events = self.model.evaluate_pending(dt_util.as_local(now), scheduled=True)
+    def _handle_window_end(self, now: datetime) -> None:
+        """Planmäßige Auswertung kurz nach dem Ende des Zeitfensters; danach den nächsten Termin setzen."""
+        self._unsub_timer = None
+        local = dt_util.as_local(now)
+        events = self.model.evaluate_pending(local, scheduled=True)
         if events:
             self._log_events(events)
         self._update_notification()
         self._publish()
         self._save_later()
+        self._schedule_evaluation(local)
 
     def _log_events(self, events: list[dict[str, Any]]) -> None:
         for event in events:
@@ -224,7 +295,7 @@ class SoftenerManager:
     async def async_refill(self, kg: float | None) -> None:
         """Nachfüllen bestätigen: die Menge (kg) ist Pflicht und wird zum Bestand addiert."""
         if kg is None or not float(kg) > 0:
-            raise ServiceValidationError("Bitte die nachgefüllte Salzmenge in kg angeben (größer als 0).")
+            raise service_error("refill_amount_required")
         added = self.model.refill(dt_util.now(), float(kg))
         if added < float(kg) - 1e-6:
             _LOGGER.warning(
@@ -249,26 +320,34 @@ class SoftenerManager:
         self.model.set_stock(kg)
         self._after_manual_change()
 
-    async def async_add_regeneration(self, count: int = 1) -> None:
-        self.model.add_manual_regeneration(dt_util.now(), count)
+    @staticmethod
+    def _past_local(at: datetime) -> datetime:
+        """Zeitpunkt als Ortszeit (ohne Zeitzone: Ortszeit von Home Assistant); Zukunft wird abgelehnt."""
+        if at.tzinfo is None:
+            at = at.replace(tzinfo=dt_util.get_default_time_zone())
+        at = dt_util.as_local(at)
+        if at > dt_util.now():
+            raise service_error("datetime_in_future")
+        return at
+
+    async def async_add_regeneration(self, count: int = 1, at: datetime | None = None) -> None:
+        """Regeneration(en) nachtragen; at = Zeitpunkt (Standard: jetzt, nicht in der Zukunft)."""
+        when = dt_util.now() if at is None else self._past_local(at)
+        self.model.add_manual_regeneration(when, count)
         self._after_manual_change()
 
     async def async_set_last_regeneration(self, at: datetime) -> None:
         """Zeitpunkt der letzten Regeneration korrigieren (ohne Zeitzone: Ortszeit von Home Assistant)."""
-        if at.tzinfo is None:
-            at = at.replace(tzinfo=dt_util.get_default_time_zone())
-        try:
-            self.model.set_last_regeneration(dt_util.as_local(at), dt_util.now())
-        except ValueError as err:
-            raise ServiceValidationError(str(err)) from err
+        when = self._past_local(at)
+        self.model.set_last_regeneration(when, dt_util.now())
         self._after_manual_change()
 
     async def async_set_regens_since_refill(self, count: int) -> None:
-        """Bekannte Regenerationen seit dem letzten Füllen setzen; der Salzbestand wird daraus berechnet."""
+        """Bekannte Regenerationen seit dem letzten Füllen setzen; der Salzbestand ändert sich relativ dazu."""
         try:
             self.model.set_regens_since_refill(count)
         except ValueError as err:
-            raise ServiceValidationError(str(err)) from err
+            raise service_error("negative_count") from err
         self._after_manual_change()
 
     def _after_manual_change(self) -> None:
@@ -306,10 +385,13 @@ class SoftenerManager:
             persistent_notification.async_dismiss(self.hass, nid)
             return
         last = self.model.state.last_regen_at
+        due = self.model.next_regen_due(now.tzinfo)
         persistent_notification.async_create(
             self.hass,
             texts["overdue_message"].format(
-                name=self.entry.title, last=dt_util.as_local(last).strftime("%d.%m.%Y %H:%M") if last else "–"
+                name=self.entry.title,
+                last=dt_util.as_local(last).strftime("%d.%m.%Y %H:%M") if last else "–",
+                due=due.strftime("%d.%m.%Y") if due else "–",
             ),
             title=texts["overdue_title"],
             notification_id=nid,
@@ -339,6 +421,9 @@ class SoftenerManager:
 
     def _publish(self) -> None:
         self.coordinator.async_set_updated_data(self.snapshot())
+
+    async def _async_update_data(self) -> dict[str, Any]:
+        return self.snapshot()
 
     def _save_later(self) -> None:
         self._store.async_delay_save(self.model.to_dict, SAVE_DELAY)
