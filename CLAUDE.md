@@ -41,8 +41,10 @@ Enthärtungsanlage über den Wasserzähler und rechnet den Salzbestand mit. Zuge
    - Erfasst wird vom Fensterbeginn bis **Fensterende + 1 Minute** (= Auswertezeitpunkt), damit verspätet gemeldete
      Zählerwerte noch zählen. Ein Wert genau zum Auswertezeitpunkt zählt nicht mehr.
    - Fenster in echter Zeit: Beginn = eingestellte Stunde in Ortszeit (doppelte Zeit: die erste; fehlende Zeit: nach
-     vorn verschoben), Länge = Ende − Beginn in echten Stunden, alle Vergleiche in UTC. Annahme: Die Uhr der Anlage
-     stellt bei der Zeitumstellung selbst um. Der Manager plant die Auswertung mit `async_track_point_in_utc_time`.
+     vorn verschoben), Länge = Ende − Beginn in echten Stunden, alle Vergleiche in UTC. Tatsache: Die Anlage stellt
+     ihre Uhr nicht selbst um, der Nutzer stellt sie nach der Umstellungsnacht von Hand um; in dieser Nacht läuft sie
+     noch auf der alten Zeit, und genau dazu passt das berechnete Fenster (März 03–04 MESZ, Oktober erste 02-Uhr-Stunde).
+     Der Manager plant die Auswertung mit `async_track_point_in_utc_time`.
    - Einheiten des Wasserzählers rechnet nur der Manager um (`VolumeConverter`); `logic.py` bleibt ohne HA-Importe.
 
 ## Veröffentlichen

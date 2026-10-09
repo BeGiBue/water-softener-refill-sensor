@@ -11,10 +11,15 @@ Funktionsweise
   (Standard 45 Liter), zählt das als eine Regeneration. Erfasst wird bewusst bis zu diesem Auswertezeitpunkt, also
   einschließlich der Minute nach dem Fensterende, damit verspätet gemeldete Zählerwerte noch zählen.
 * Zeitfenster in echter Zeit: Der Beginn ist die eingestellte Stunde in Ortszeit, die Länge (Ende − Beginn) wird in
-  echten Stunden gerechnet, alle Vergleiche laufen in UTC. Annahme: Die Uhr der Anlage folgt der Ortszeit und stellt
-  bei Sommer-/Winterzeit selbst um. Folgen bei der Umstellung (Europe/Berlin, Fenster 2–3 Uhr):
-  - Oktober: Fenster 02:00 MESZ bis 02:00 MEZ (die erste der beiden Stunden), keine Doppelerfassung.
-  - März: 02:00 gibt es nicht, der Beginn rückt auf 03:00 MESZ vor, Fenster 03:00 bis 04:00 MESZ.
+  echten Stunden gerechnet, alle Vergleiche laufen in UTC.
+  Tatsache (vom Nutzer bestätigt): Die Anlage stellt ihre Uhr **nicht** selbst um. Der Nutzer stellt sie von Hand um,
+  in der Praxis nach der Umstellungsnacht; in dieser Nacht regeneriert die Anlage also noch nach ihrer alten Uhr.
+  Genau das trifft die Regel (Europe/Berlin, Fenster 2–3 Uhr):
+  - Oktober: Fenster 02:00 MESZ bis 02:00 MEZ (die erste der beiden Stunden) = 02:00 bis 03:00 der Anlage, die noch
+    auf Sommerzeit steht; keine Doppelerfassung.
+  - März: 02:00 gibt es nicht, der Beginn rückt auf 03:00 MESZ vor, Fenster 03:00 bis 04:00 MESZ = 02:00 bis 03:00 MEZ
+    der Anlage, die noch auf Winterzeit steht.
+  Wird die Anlagenuhr schon vor der Umstellungsnacht umgestellt, liegt ihre Regeneration in dieser Nacht neben dem Fenster.
 * Jede Regeneration verbraucht eine einstellbare Menge Salz. Der Salzbestand ist rein rechnerisch. Beim Nachfüllen
   muss die nachgefüllte Menge (kg) angegeben werden; sie wird zum Bestand addiert (höchstens bis voll).
 """

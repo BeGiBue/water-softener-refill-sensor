@@ -306,7 +306,7 @@ def berlin(y, mo, d, hh, mm=0, ss=0, fold=0):
 
 
 class DaylightSaving(unittest.TestCase):
-    """Fenster in echter Zeit (UTC): Die Anlage folgt der Ortszeit und stellt selbst um (Annahme, siehe logic.py)."""
+    """Fenster in echter Zeit (UTC). Die Anlagenuhr wird erst nach der Umstellungsnacht von Hand umgestellt (siehe logic.py)."""
 
     def test_october_night_counts_first_hour_only(self):
         m = model(capacity_kg=100)

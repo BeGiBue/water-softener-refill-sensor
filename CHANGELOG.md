@@ -7,8 +7,10 @@ Korrekturen aus einem Code-Review.
 - Zeitumstellung: Das Zeitfenster wird in echter Zeit gerechnet (Beginn zur eingestellten Ortszeit, Länge in echten
   Stunden, Vergleiche in UTC); die Auswertung läuft zum echten Fensterende + 1 Minute. Bisher war das Fenster 2 bis 3 Uhr
   in der Nacht der Umstellung auf Sommerzeit nur eine Minute lang, und bei der Umstellung auf Winterzeit wurde die
-  doppelte Stunde zweimal erfasst. Jetzt: im März 03:00 bis 04:00 Uhr, im Oktober die erste Stunde 02:00 bis 03:00
-  (Sommerzeit). Annahme: Die Uhr der Anlage stellt sich selbst um.
+  doppelte Stunde zweimal erfasst. Jetzt: im März 03:00 bis 04:00 Uhr Sommerzeit, im Oktober die erste Stunde 02:00
+  bis 03:00 (Sommerzeit). Die Uhr der Anlage stellt sich nicht selbst um und läuft in der Umstellungsnacht noch auf der
+  alten Zeit; das Fenster entspricht damit genau 02:00 bis 03:00 der Anlage. Die Anlagenuhr erst nach der
+  Umstellungsnacht umstellen.
 - „Regenerationen seit Nachfüllen korrigieren“ (und der Dienst `set_regenerations_since_refill`) ändert den Salzbestand
   jetzt relativ zur bisherigen Anzahl. Erneutes Bestätigen desselben Werts ändert nichts, Teil-Nachfüllungen gehen nicht
   mehr verloren.

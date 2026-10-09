@@ -12,9 +12,10 @@ ohne sie genutzt werden.
   Wasser. Die Integration überwacht dazu den **Wasserzähler** (kumulierter Stand). Wird im Zeitfenster **mehr als der
   Schwellwert** (Standard 45 Liter) verbraucht, zählt das als **eine** Regeneration. Ausgewertet wird eine Minute nach
   Ende des Zeitfensters; Zählerwerte aus dieser Minute zählen noch mit (verspätete Meldungen des Zählers).
-  Das Fenster beginnt zur eingestellten Ortszeit und dauert die eingestellten Stunden in echter Zeit; bei der
-  Zeitumstellung (Annahme: die Uhr der Anlage stellt sich selbst um) gilt in Deutschland mit 2 bis 3 Uhr: im März
-  03:00 bis 04:00 Uhr (02:00 gibt es nicht), im Oktober die erste der beiden Stunden 02:00 bis 03:00 (Sommerzeit).
+  Das Fenster beginnt zur eingestellten Ortszeit und dauert die eingestellten Stunden in echter Zeit. In der Nacht der
+  Zeitumstellung gilt in Deutschland mit 2 bis 3 Uhr: im März 03:00 bis 04:00 Uhr Sommerzeit (02:00 gibt es nicht),
+  im Oktober die erste der beiden Stunden 02:00 bis 03:00 (Sommerzeit). Das passt zur Anlage, deren Uhr sich nicht
+  selbst umstellt und in dieser Nacht noch auf der alten Zeit läuft (siehe „Hinweise und Grenzen“).
 - **Salzbestand rechnen:** Du gibst ein, wie viel Kilogramm Salz in den Behälter passen und wie viel eine Regeneration
   verbraucht. Jede erkannte Regeneration verringert den rechnerischen Bestand.
 - **Warnung:** Erreicht der rechnerische Restbestand die Warnschwelle (Standard **3 Regenerationen**), erscheint eine
@@ -147,9 +148,10 @@ Die Karte hat eine Tafel „Enthärtungsanlage“ mit zwei Zeilen. Im Kartenedit
 - Der Salzverbrauch pro Regeneration wird als **konstant** angenommen. Der Bestand ist rein rechnerisch und ersetzt
   keinen Blick in den Salzbehälter.
 - Das Zeitfenster darf nicht über Mitternacht gehen (Beginn muss vor dem Ende liegen).
-- Zeitumstellung: Das Fenster folgt der Ortszeit in echter Dauer (siehe oben). Stellt sich die Uhr der Anlage **nicht**
-  selbst um, liegt ihre Regeneration in den beiden Umstellungsnächten eine Stunde neben dem Fenster und wird dann
-  möglicherweise nicht erkannt (nachtragen mit `add_regeneration`).
+- Zeitumstellung: Die Uhr der Anlage stellt sich nicht selbst um. Das Fenster ist so gerechnet, dass es in der
+  Umstellungsnacht zur **alten** Uhrzeit der Anlage passt. Die Anlagenuhr deshalb erst **nach** der Umstellungsnacht
+  (Sonntag nach 03:00 Uhr) umstellen; wird sie schon vorher umgestellt, liegt ihre Regeneration in dieser Nacht neben dem
+  Fenster und wird möglicherweise nicht erkannt (nachtragen mit `add_regeneration`).
 - Zustand (Zähler, Bestand) wird gespeichert und bleibt über Neustarts erhalten.
 - Benötigt Home Assistant 2024.12 oder neuer.
 
